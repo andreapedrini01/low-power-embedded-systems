@@ -58,9 +58,8 @@
 // I parametri MFCC sono definiti in model.h
 #define N_FFT_BINS      (FRAME_LEN / 2 + 1)   // 129 unique bins from RFFT
 
-// Number of MFCC frames in the entire 1-second window
-//   = (16000 − 256) / 128 + 1  ≈  123 frames
-#define NUM_FRAMES      ((SAMPLE_RATE - FRAME_LEN) / HOP_LEN + 1)
+// Number of MFCC frames expected by the model (must match training)
+#define NUM_FRAMES      126
 
 // ─────────────────────────────────────────────────────────────
 //  Classes
@@ -70,11 +69,14 @@ static const int   NUM_CLASSES    = N_CLASSES;
 
 // ─────────────────────────────────────────────────────────────
 //  Audio buffer
+//  Extra padding for librosa-compatible center=True STFT
 // ─────────────────────────────────────────────────────────────
 #define AUDIO_BUF_LEN   SAMPLE_RATE   // 1 s = 16 000 samples int16
+#define PADDED_LEN      (AUDIO_BUF_LEN + FRAME_LEN)  // center padding
 #define PDM_BUF_LEN     256           // PDM callback buffer size
 
 static int16_t          audioBuf[AUDIO_BUF_LEN];  // sliding window 1 s
+static int16_t          paddedBuf[PADDED_LEN];     // zero-padded for center=True
 static int16_t          pdmBuf[PDM_BUF_LEN];      // scratch for PDM driver
 static volatile int     samplesRead = 0;
 static          int     writeCursor = 0;
@@ -164,28 +166,40 @@ static void buildMelFilterbank() {
     binIdx[i] = constrain(bin, 0, N_FFT_BINS - 1);
   }
 
-  // Triangular weights
+  // Triangular weights with Slaney normalization (divide by bandwidth)
+  // This matches librosa's default norm='slaney'
   memset(melFB, 0, sizeof(melFB));
   for (int m = 0; m < N_MEL; m++) {
     int lo  = binIdx[m];
     int ctr = binIdx[m + 1];
     int hi  = binIdx[m + 2];
 
+    // Slaney normalization factor: 2 / (hz_high - hz_low)
+    float hzLo  = melToHz(melPts[m]);
+    float hzCtr = melToHz(melPts[m + 1]);
+    float hzHi  = melToHz(melPts[m + 2]);
+    float slaney = 2.0f / (hzHi - hzLo);
+
     for (int k = lo; k < ctr && ctr != lo; k++)
-      melFB[m][k] = (float)(k - lo) / (float)(ctr - lo);   // rising slope
+      melFB[m][k] = slaney * (float)(k - lo) / (float)(ctr - lo);   // rising slope
     for (int k = ctr; k <= hi && hi != ctr; k++)
-      melFB[m][k] = (float)(hi - k) / (float)(hi - ctr);   // falling slope
+      melFB[m][k] = slaney * (float)(hi - k) / (float)(hi - ctr);   // falling slope
   }
 }
 
 // ─────────────────────────────────────────────────────────────
-//  Precompute: DCT-II orthogonal matrix
-//    dctMat[k][m] = cos( π·k·(2m+1) / (2·N_MEL) )
+//  Precompute: DCT-II orthonormal matrix (matches librosa/scipy)
+//    dctMat[k][m] = norm_factor * cos( π·k·(2m+1) / (2·N_MEL) )
+//    norm_factor = sqrt(1/N_MEL) for k=0, sqrt(2/N_MEL) for k>0
 // ─────────────────────────────────────────────────────────────
 static void buildDCTMatrix() {
-  for (int k = 0; k < N_MFCC; k++)
+  float norm0 = sqrtf(1.0f / (float)N_MEL);
+  float normK = sqrtf(2.0f / (float)N_MEL);
+  for (int k = 0; k < N_MFCC; k++) {
+    float nf = (k == 0) ? norm0 : normK;
     for (int m = 0; m < N_MEL; m++)
-      dctMat[k][m] = cosf(PI * (float)k * (2.0f * m + 1.0f) / (2.0f * N_MEL));
+      dctMat[k][m] = nf * cosf(PI * (float)k * (2.0f * m + 1.0f) / (2.0f * N_MEL));
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -209,7 +223,12 @@ static void computeMFCCFrame(const int16_t* frameStart, float32_t* mfccOut) {
   //   CMSIS: [Re(0), Re(N/2), Re(1),Im(1), Re(2),Im(2), ...]
   arm_rfft_fast_f32(&rfft, _wind, _fftOut, 0);
 
-  // Step 4: Power Spectrum  P[k] = Re²[k] + Im²[k]
+  // Step 4: Power Spectrum  P[k] = |X[k]|² / N_FFT
+  //   librosa uses power spectrum = |STFT|^2, and STFT is normalized by n_fft
+  //   So P[k] = (Re² + Im²) / FRAME_LEN²  — but since mel filters are linear,
+  //   we can equivalently divide after mel: same result.
+  //   Actually librosa computes S = |stft|^2 where stft already divides by nothing
+  //   for the 'spectrum' — it uses magnitude squared directly.
   //   Bin DC (0) and Nyquist (128): Im = 0 by definition → only Re²
   _power[0]            = _fftOut[0] * _fftOut[0];              // DC
   _power[N_FFT_BINS-1] = _fftOut[1] * _fftOut[1];              // Nyquist
@@ -230,12 +249,41 @@ static void computeMFCCFrame(const int16_t* frameStart, float32_t* mfccOut) {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Compute the full MFCC matrix over the 1-second window
-// Fills mfccMatrix[NUM_FRAMES × N_MFCC]
+// Compute the full MFCC matrix over the 1-second window,
+// with center=True padding (like librosa), normalize per-coefficient,
+// and store TRANSPOSED [N_MFCC × NUM_FRAMES] for CNN input [1, 13, 126, 1].
 // ─────────────────────────────────────────────────────────────
 static void computeAllMFCCs() {
-  for (int f = 0; f < NUM_FRAMES; f++)
-    computeMFCCFrame(&audioBuf[f * HOP_LEN], &mfccMatrix[f * N_MFCC]);
+  float32_t frameMfcc[N_MFCC];
+
+  // ── center=True: pad FRAME_LEN/2 zeros on each side ──
+  int pad = FRAME_LEN / 2;  // 128
+  memset(paddedBuf, 0, sizeof(paddedBuf));
+  // Pre-emphasis on the raw audio, then copy into padded buffer
+  // Actually, pre-emphasis is done per-frame in computeMFCCFrame,
+  // so we just copy raw samples with zero padding on both sides.
+  for (int i = 0; i < AUDIO_BUF_LEN; i++)
+    paddedBuf[pad + i] = audioBuf[i];
+  // paddedBuf[0..pad-1] = 0  (left padding)
+  // paddedBuf[pad+AUDIO_BUF_LEN..PADDED_LEN-1] = 0  (right padding)
+
+  // Number of frames from padded signal: (PADDED_LEN - FRAME_LEN) / HOP_LEN + 1
+  // = (16256 - 256) / 128 + 1 = 126
+  int totalFrames = (PADDED_LEN - FRAME_LEN) / HOP_LEN + 1;
+  int framesToUse = (totalFrames < NUM_FRAMES) ? totalFrames : NUM_FRAMES;
+
+  // Zero the output
+  memset(mfccMatrix, 0, sizeof(mfccMatrix));
+
+  for (int f = 0; f < framesToUse; f++) {
+    computeMFCCFrame(&paddedBuf[f * HOP_LEN], frameMfcc);
+
+    // Normalize and store transposed: mfccMatrix[coeff * NUM_FRAMES + frame]
+    for (int c = 0; c < N_MFCC; c++) {
+      float32_t norm = (frameMfcc[c] - NORM_MEAN[c]) / NORM_STD[c];
+      mfccMatrix[c * NUM_FRAMES + f] = norm;
+    }
+  }
 }
 
 // ─────────────────────────────────────────────────────────────
