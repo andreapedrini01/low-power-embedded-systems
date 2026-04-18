@@ -43,10 +43,8 @@
 // TensorFlow Lite Micro
 #include "TensorFlowLite.h"
 #include "tensorflow/lite/micro/all_ops_resolver.h"
-#include "tensorflow/lite/micro/micro_error_reporter.h"
 #include "tensorflow/lite/micro/micro_interpreter.h"
 #include "tensorflow/lite/schema/schema_generated.h"
-#include "tensorflow/lite/version.h"
 
 // Weights of the Colab model
 #include "model.h"   // defines: const unsigned char model_data[];
@@ -114,7 +112,6 @@ static uint8_t tensorArena[TENSOR_ARENA_SIZE];
 
 // Namespace to avoid conflicts with local variables
 namespace {
-  tflite::ErrorReporter*   errorReporter = nullptr;
   const tflite::Model*     tflModel      = nullptr;
   tflite::MicroInterpreter* interpreter  = nullptr;
   TfLiteTensor*            tflInput      = nullptr;
@@ -345,8 +342,6 @@ void setup() {
 
   // ── 3. Initialize TFLite Micro ──────────────────────────
   Serial.print("  [3/4] Loading model ...      ");
-  static tflite::MicroErrorReporter microErrorReporter;
-  errorReporter = &microErrorReporter;
 
   tflModel = tflite::GetModel(model_data);
   if (tflModel->version() != TFLITE_SCHEMA_VERSION) {
@@ -362,7 +357,7 @@ void setup() {
   Serial.print("  [3/4] AllocateTensors ...   ");
   static tflite::AllOpsResolver resolver;
   static tflite::MicroInterpreter staticInterp(
-      tflModel, resolver, tensorArena, TENSOR_ARENA_SIZE, errorReporter);
+      tflModel, resolver, tensorArena, TENSOR_ARENA_SIZE);
   interpreter = &staticInterp;
 
   if (interpreter->AllocateTensors() != kTfLiteOk) {
