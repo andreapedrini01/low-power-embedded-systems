@@ -209,11 +209,17 @@ static void buildDCTMatrix() {
 // ─────────────────────────────────────────────────────────────
 static void computeMFCCFrame(const int16_t* frameStart, float32_t* mfccOut) {
 
+  // Step 0: Convert int16 PCM to float [-1.0, 1.0] (librosa convention)
+  //   librosa.load returns float32 in [-1, 1], PDM gives int16 in [-32768, 32767]
+  static float32_t _pcmFloat[FRAME_LEN];
+  for (int i = 0; i < FRAME_LEN; i++)
+    _pcmFloat[i] = (float32_t)frameStart[i] / 32768.0f;
+
   // Step 1: Pre-emphasis — enhance high frequencies
   //   sig[i] = frame[i] − α · frame[i−1]
-  _sig[0] = (float32_t)frameStart[0];
+  _sig[0] = _pcmFloat[0];
   for (int i = 1; i < FRAME_LEN; i++)
-    _sig[i] = (float32_t)frameStart[i] - PRE_EMPHASIS * (float32_t)frameStart[i-1];
+    _sig[i] = _pcmFloat[i] - PRE_EMPHASIS * _pcmFloat[i-1];
 
   // Step 2: Hamming window — reduce spectral leakage at frame edges
   //   CMSIS arm_mult_f32: vectorized multiply with SIMD → 4 products per cycle
