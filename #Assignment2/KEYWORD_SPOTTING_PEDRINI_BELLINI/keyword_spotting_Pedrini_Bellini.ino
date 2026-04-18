@@ -52,15 +52,8 @@
 // ─────────────────────────────────────────────────────────────
 //  MFCC Parameters
 // ─────────────────────────────────────────────────────────────
-#define SAMPLE_RATE     16000       // Hz  (Nyquist → 8 kHz, covers all speech)
-#define FRAME_LEN       256         // samples per frame  = 16 ms  @ 16 kHz
-#define HOP_LEN         128         // hop between frames  =  8 ms  (50% overlap)
+// I parametri MFCC sono definiti in model.h
 #define N_FFT_BINS      (FRAME_LEN / 2 + 1)   // 129 unique bins from RFFT
-#define N_MEL           26          // triangular Mel filters
-#define N_MFCC          13          // cepstral coefficients to keep
-#define MEL_LOW_HZ      300.0f      // minimum Mel filter frequency (Hz)
-#define MEL_HIGH_HZ     8000.0f     // maximum Mel filter frequency (Hz)
-#define PRE_EMPHASIS    0.97f       // pre-emphasis coefficient α
 
 // Number of MFCC frames in the entire 1-second window
 //   = (16000 − 256) / 128 + 1  ≈  123 frames
@@ -69,8 +62,8 @@
 // ─────────────────────────────────────────────────────────────
 //  Classes
 // ─────────────────────────────────────────────────────────────
-static const char* CLASS_LABELS[] = { "clap", "tap", "snap", "silence" };
-static const int   NUM_CLASSES    = 4;
+// CLASS_LABELS e N_CLASSES sono già definiti in model.h
+static const int   NUM_CLASSES    = N_CLASSES;
 
 // ─────────────────────────────────────────────────────────────
 //  Audio buffer
@@ -343,7 +336,7 @@ void setup() {
   // ── 3. Initialize TFLite Micro ──────────────────────────
   Serial.print("  [3/4] Loading model ...      ");
 
-  tflModel = tflite::GetModel(model_data);
+  tflModel = tflite::GetModel(model);
   if (tflModel->version() != TFLITE_SCHEMA_VERSION) {
     Serial.print("FAIL  (schema: model=");
     Serial.print(tflModel->version());
