@@ -1,106 +1,200 @@
-# EnergyAwarePath
+# EnergyAwarePath - Adaptive Multi-Exit Inference
 
-**Low-Power Embedded Systems** — Assignment 3  
-Pedrini, Bellini
+**Low-Power Embedded Systems - Assignment 3**  
+**Authors:** Pedrini, Bellini  
+**Hardware:** Arduino Nano 33 BLE Sense Lite (nRF52840)
 
-## What this project is
+---
 
-A small TinyML demo that runs entirely on an Arduino Nano 33 BLE Sense. The board pretends to be a tiny robot navigating a series of checkpoints. At every checkpoint there are three candidate paths to choose from, each with its own length, slope, terrain difficulty and number of turns. The board reads the IMU for about a second to figure out what's happening physically (is it still? is it shaking? tilted?), then asks a quantized neural network to estimate how much energy each path would consume. It picks the cheapest one, subtracts the predicted cost from a simulated battery budget, and moves on.
+## Overview
 
-The whole loop runs on-device, no cloud, no WiFi. Inference takes around half a millisecond.
+EnergyAwarePath implements **adaptive multi-exit inference** for energy-aware path selection on a microcontroller. The system dynamically adjusts inference complexity based on available energy budget, inspired by the ePerceptive paper (SenSys '20).
 
-## Why it matters
+### Key Features
 
-The real point isn't navigation. It's showing that a 3 KB neural network running on a 5-euro microcontroller can make decisions that depend on live sensor context. Replace the synthetic data with real telemetry from a robot, drone or wearable, and the same pipeline applies. The architecture is the lesson, not the specific scenario.
+- **Multi-exit neural network**: 3 inference levels with different accuracy/latency tradeoffs
+- **Adaptive policy**: Automatically selects the appropriate exit based on energy budget
+- **On-device TinyML**: Quantized int8 models running on 256KB SRAM
+- **Context-aware decisions**: Uses IMU sensor data (accelerometer + gyroscope) for path evaluation
 
-For more on what the project demonstrates and what it doesn't, see [`DATASET.md`](DATASET.md).
+### How It Works
 
-## Architecture
+At each checkpoint, the system evaluates 3 path branches and selects the one with lowest predicted energy cost. The inference complexity adapts to the remaining budget:
 
-```
-IMU (LSM9DS1) → 5 features → [budget + branch_meta + sensor_features]
-                                       ↓
-                              TFLite Micro (int8)
-                                       ↓
-                              predicted energy cost
-                                       ↓
-                              path selection + budget update
-```
+| Budget Level | Exit Used | Latency | Accuracy |
+|--------------|-----------|---------|----------|
+| ≥ 0.6 | Full model (2 hidden layers) | ~0.55 ms | Highest |
+| 0.3 - 0.6 | Exit 1 (1 hidden layer) | ~0.41 ms | Good |
+| < 0.3 | Linear formula | 0 ms | Acceptable |
 
-## Project layout
+---
+
+## Project Structure
 
 ```
 EnergyAwarePath/
-├── EnergyAwarePath_Training.ipynb   Colab notebook (dataset, training, TFLite export)
-├── DATASET.md                        How the synthetic dataset is built
-├── README.md                         You are here
-└── EnergyAwarePath/                 Arduino sketch folder
-    ├── EnergyAwarePath.ino          Main loop, serial commands
-    ├── config.h                     Branch definitions, normalization, quant params
-    ├── sensors.h / sensors.cpp      IMU windowed acquisition (~1.2s @ 100Hz)
-    ├── features.h / features.cpp    5-feature extraction
-    ├── inference.h / inference.cpp  TFLite Micro setup and invoke
-    ├── planner.h / planner.cpp      Branch evaluation + 5 decision policies
-    ├── model.h                      Quantized model as C array (from Colab)
-    └── model.tflite                 Same model in binary form (reference only)
+├── README.md                                        # This file
+├── ADAPTIVE_EXTENSION.md                            # Technical specification
+├── EnergyAwarePath_Training_MultiExit_COMPLETE.ipynb  # Training notebook
+└── EnergyAwarePath/                                 # Arduino sketch
+    ├── Energy-Aware-Path.ino                        # Main file
+    ├── config.h                                     # Configuration
+    ├── inference.cpp/h                              # TFLite inference
+    ├── planner.cpp/h                                # Decision logic
+    ├── features.cpp/h                               # Feature extraction
+    ├── sensors.cpp/h                                # IMU interface
+    ├── model.h                                      # Full model (3.3 KB)
+    └── model_exit1.h                                # Exit 1 model (2.5 KB)
 ```
 
-## Workflow
+---
 
-### 1. Train the model on Colab
+## Reproducing the Results
 
-Open `EnergyAwarePath_Training.ipynb` in Google Colab and run every cell. The notebook generates the synthetic dataset, trains a small MLP, compares it against a linear regression baseline, quantizes to int8, and emits `model.h` ready for Arduino.
+### 1. Training (Google Colab)
 
-When training finishes, download two files from Colab:
-- `model.h` → place in `EnergyAwarePath/EnergyAwarePath/`
-- `model.tflite` → keep alongside it for documentation
+1. Open `EnergyAwarePath_Training_MultiExit_COMPLETE.ipynb` in Google Colab
+2. Run all cells (Runtime → Run all)
+3. Download the generated files:
+   - `model.h` (full model)
+   - `model_exit1.h` (exit 1 model)
 
-The notebook also prints a block with `FEATURE_MIN` and `FEATURE_MAX` arrays. Copy those values into `config.h` so the on-device normalization matches the training distribution.
+**Training details:**
+- Dataset: 5400 synthetic samples (energy cost predictions)
+- Architecture: Multi-exit MLP with shared layers
+- Quantization: Full int8 for embedded deployment
+- Training time: ~20 minutes on Colab
 
-### 2. Flash the Arduino
+### 2. Arduino Deployment
 
-In the Arduino IDE (or Arduino Cloud), install:
-- `Arduino_LSM9DS1`
-- `Harvard_TinyMLx` — provides the full TensorFlow Lite Micro stack
+1. Replace `model.h` and `model_exit1.h` in the Arduino sketch folder
+2. Open `Energy-Aware-Path.ino` in Arduino IDE
+3. Install required libraries:
+   - `Arduino_LSM9DS1`
+   - `Harvard_TinyMLx`
+4. Compile and upload to Arduino Nano 33 BLE Sense Lite
+5. Open Serial Monitor (115200 baud)
 
-Select **Arduino Nano 33 BLE Sense** as the board, open `EnergyAwarePath.ino`, then compile and upload.
+### 3. Testing
 
-### 3. Run the demo
+```
+Commands:
+  6    - Enable adaptive policy
+  n    - Execute next checkpoint (repeat 4 times)
+  s    - Show summary
+  r    - Reset mission
+```
 
-Open the Serial Monitor at **115200 baud**. Commands:
+**Expected behavior:**
+- Checkpoint 1 (budget 1.0): Uses FULL MODEL
+- Checkpoint 2 (budget ~0.8): Uses FULL MODEL
+- Checkpoint 3 (budget ~0.4): Uses EXIT 1 (faster)
+- Checkpoint 4 (budget ~0.2): Uses LINEAR FORMULA (if reached)
 
-| Key | Action |
-|---|---|
-| `n` or `ENTER` | Trigger next checkpoint |
-| `r` | Reset mission (budget back to 1.0) |
-| `1` – `5` | Switch decision policy (1=ML, 2=Always-A, 3=Shortest, 4=Random, 5=Oracle) |
-| `s` | Print mission summary |
+---
 
-Each `n` starts a 1.2-second IMU acquisition window. Move the board however you want during that window — keep it still, tilt it, shake it, swing it in a circle. The output shows the predicted cost for each branch, the chosen path, the remaining budget, and what an oracle policy (using the exact ground-truth formula) would have picked.
+## Results
 
-A typical run completes 4 checkpoints under budget when the ML policy works well. If you want to see the comparison clearly, run the same physical sequence under different policies and check the totals at the end.
+### Model Sizes
 
-## Model details
+| Model | Flash Size | SRAM Arena | Parameters |
+|-------|------------|------------|------------|
+| Full model | 3.3 KB | 712 bytes | ~321 |
+| Exit 1 model | 2.5 KB | 584 bytes | ~177 |
 
-| Property | Value |
-|---|---|
-| Input | 10 features (1 budget + 4 branch + 5 IMU) |
-| Architecture | Dense(16, relu) → Dense(8, relu) → Dense(1, sigmoid) |
-| Parameters | ~321 |
-| Quantization | full int8 |
-| Model size | ~3.3 KB |
-| Tensor arena | 8 KB allocated, ~712 B used |
-| Inference time | ~0.5 ms |
-| Test MAE (quantized) | ~0.012 |
+### Performance Metrics
 
-## Decision policies
+From test run:
 
-| Policy | What it does |
-|---|---|
-| ML | Neural network prediction (the main subject of the project) |
-| Always-A | Trivial baseline: always picks branch A |
-| Shortest | Picks the branch with smallest `length` |
-| Random | Uniform random pick |
-| Oracle | Uses the ground-truth formula directly — upper bound for comparison |
+| Metric | Value |
+|--------|-------|
+| Checkpoints completed | 3 / 4 |
+| Total energy consumed | 1.000 |
+| Efficiency vs Oracle | 93.4% |
+| Agreement with Oracle | 100% (3/3) |
+| Latency (full model) | 0.54-0.56 ms |
+| Latency (exit 1) | 0.41 ms |
+| Latency reduction | 27% |
 
-The point of the baselines is to show that the ML policy actually adds value over naive strategies, while staying close to the oracle.
+### Adaptive Behavior
+
+The system successfully demonstrates graceful degradation:
+- High budget → Maximum accuracy (full model)
+- Medium budget → Reduced latency (exit 1)
+- Low budget → Zero inference cost (formula)
+
+---
+
+## Technical Details
+
+### Neural Network Architecture
+
+**Full Model:**
+```
+Input(10) → Dense(16, relu) → Dense(8, relu) → Dense(1, sigmoid)
+```
+
+**Exit 1 Model:**
+```
+Input(10) → Dense(16, relu) → Dense(1, sigmoid)
+```
+
+Both models are trained jointly with weighted loss:
+```python
+loss_weights = {'exit1': 0.4, 'final': 1.0}
+```
+
+### Input Features (10 dimensions)
+
+1. Energy budget (normalized)
+2. Path length (normalized)
+3. Number of turns (normalized)
+4. Path difficulty (normalized)
+5. Slope (normalized)
+6. Accelerometer mean (from IMU)
+7. Accelerometer std (from IMU)
+8. Accelerometer peak (from IMU)
+9. Gyroscope mean (from IMU)
+10. Tilt angle (from IMU)
+
+### Adaptive Policy Logic
+
+```cpp
+if (budget >= 0.6)
+    use full_model;        // Maximum accuracy
+else if (budget >= 0.3)
+    use exit1_model;       // Balanced
+else
+    use linear_formula;    // Minimum cost
+```
+
+---
+
+## Requirements
+
+### Hardware
+- Arduino Nano 33 BLE Sense Lite
+- USB cable for programming
+
+### Software
+- Arduino IDE 1.8.x or 2.x
+- Google Colab (for training)
+- Python 3.x with TensorFlow 2.x (included in Colab)
+
+### Libraries
+- `Arduino_LSM9DS1` (IMU driver)
+- `Harvard_TinyMLx` (TensorFlow Lite Micro)
+
+---
+
+## References
+
+- **ePerceptive**: Montanari et al., "ePerceptive: Energy Reactive Embedded Intelligence for Batteryless Sensors", SenSys 2020
+- **TinyML**: Pete Warden, Daniel Situnayake, "TinyML: Machine Learning with TensorFlow Lite on Arduino and Ultra-Low-Power Microcontrollers"
+
+---
+
+## License
+
+Academic project for Low-Power Embedded Systems course.
+

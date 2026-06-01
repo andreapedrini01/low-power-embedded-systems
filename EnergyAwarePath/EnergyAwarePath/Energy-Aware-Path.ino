@@ -65,17 +65,24 @@ void setup() {
     while (1) { delay(1000); }
   }
   
+  // Initialize exit1 model (optional, for adaptive policy)
+  if (!inference_init_exit1()) {
+    Serial.println("WARNING: Exit-1 model init failed. Adaptive policy will fall back to full model.");
+    // Not fatal: adaptive policy can degrade to POLICY_ML
+  }
+  
   Serial.println();
   Serial.println("--- System Ready ---");
   Serial.print("Initial energy budget: ");
   Serial.println(INITIAL_BUDGET);
   Serial.print("Checkpoints: ");
   Serial.println(NUM_CHECKPOINTS);
-  Serial.print("Policy: ML (press 1-5 to change)");
+  Serial.print("Policy: ML (press 1-6 to change)");
   Serial.println();
   Serial.println();
   Serial.println("Press 'n' or ENTER to trigger next checkpoint.");
   Serial.println("Press 'r' to reset. Press 's' for summary.");
+  Serial.println("Press 1-6 to change policy (6=Adaptive).");
   Serial.println();
   
   randomSeed(analogRead(0));
@@ -128,6 +135,10 @@ void loop() {
       case '5':
         current_policy = POLICY_ORACLE;
         Serial.println("Policy: Oracle (formula)");
+        break;
+      case '6':
+        current_policy = POLICY_ADAPTIVE;
+        Serial.println("Policy: Adaptive (exit selection based on budget)");
         break;
         
       case 's':
@@ -218,10 +229,18 @@ void run_checkpoint() {
   Serial.print("Remaining budget: ");
   Serial.println(energy_budget, 3);
   
-  if (current_policy == POLICY_ML) {
+  if (current_policy == POLICY_ML || current_policy == POLICY_ADAPTIVE) {
     Serial.print("Inference time: ");
     Serial.print(dec.inference_time_us / 1000.0f, 2);
     Serial.println(" ms");
+  }
+  
+  if (current_policy == POLICY_ADAPTIVE) {
+    ExitLevel lvl = inference_last_exit_level();
+    Serial.print("Exit used: ");
+    if (lvl == EXIT_FULL)   Serial.println("FULL MODEL (budget high)");
+    if (lvl == EXIT_MIDDLE) Serial.println("EXIT 1 (budget medium)");
+    if (lvl == EXIT_LINEAR) Serial.println("LINEAR FORMULA (budget low)");
   }
   
   // 8. Track comparison metrics

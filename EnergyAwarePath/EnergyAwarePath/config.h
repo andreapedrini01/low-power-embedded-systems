@@ -80,13 +80,22 @@ extern int   INPUT_ZERO;
 extern float OUTPUT_SCALE;
 extern int   OUTPUT_ZERO;
 
+// --- Adaptive inference thresholds ---
+#define BUDGET_HIGH_THRESHOLD   0.6f   // above: use full model
+#define BUDGET_LOW_THRESHOLD    0.3f   // below: use oracle formula (no TFLite)
+// between LOW and HIGH: use exit 1 model
+
+// --- Tensor arena for exit 1 model (smaller) ---
+#define TENSOR_ARENA_EXIT1_SIZE 4096   // 4 KB, sufficient for the reduced model
+
 // --- Decision policies ---
 enum Policy {
   POLICY_ML = 0,
   POLICY_ALWAYS_A,
   POLICY_SHORTEST,
   POLICY_RANDOM,
-  POLICY_ORACLE
+  POLICY_ORACLE,
+  POLICY_ADAPTIVE    // new: selects exit based on current budget
 };
 
 #endif // CONFIG_H

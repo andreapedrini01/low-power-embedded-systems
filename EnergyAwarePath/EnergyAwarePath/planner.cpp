@@ -154,6 +154,52 @@ Decision planner_decide(int checkpoint_idx, float budget,
     dec.selected_branch = best;
     dec.selected_cost = dec.predicted_costs[best];
   }
+  // --- Adaptive Policy (selects exit based on budget) ---
+  else if (policy == POLICY_ADAPTIVE) {
+    unsigned long total_lat = 0;
+    for (int b = 0; b < NUM_BRANCHES; b++) {
+      float feat[NUM_FEATURES];
+      planner_build_features(budget, branches[b], sensor, feat);
+      planner_normalize(feat);
+      
+      // Pre-compute oracle cost (used as fallback if budget low)
+      float oracle_cost = planner_oracle_cost(budget, branches[b], sensor);
+      
+      unsigned long lat = 0;
+      dec.predicted_costs[b] = inference_predict_adaptive(feat, budget, oracle_cost, lat);
+      total_lat += lat;
+    }
+    dec.inference_time_us = total_lat;
+    
+    // Find minimum cost branch
+    int best = 0;
+    for (int b = 1; b < NUM_BRANCHES; b++) {
+      if (dec.predicted_costs[b] < dec.predicted_costs[best]) {
+        best = b;
+      }
+    }
+    
+    // Safety margin check (same logic as POLICY_ML)
+    if (budget < SAFETY_MARGIN) {
+      if (dec.predicted_costs[best] > 0.5f * budget) {
+        int safest = best;
+        float min_safe = dec.predicted_costs[best];
+        for (int b = 0; b < NUM_BRANCHES; b++) {
+          if (b != best && dec.predicted_costs[b] < min_safe) {
+            safest = b;
+            min_safe = dec.predicted_costs[b];
+          }
+        }
+        if (safest != best) {
+          best = safest;
+          dec.safety_override = true;
+        }
+      }
+    }
+    
+    dec.selected_branch = best;
+    dec.selected_cost = dec.predicted_costs[best];
+  }
   
   return dec;
 }
