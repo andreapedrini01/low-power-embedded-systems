@@ -1,23 +1,15 @@
 # EnergyAwarePath — Technical Specification
 
-**Inspired by:** ePerceptive (SenSys '20, Montanari et al.)  
-**Course:** Low-Power Embedded Systems — Assignment 3  
 **Authors:** Pedrini, Bellini  
 **Hardware:** Arduino Nano 33 BLE Sense Lite (256 KB SRAM, 1 MB flash)
 
----
-
 ## 1. Objective
 
-This extension implements **adaptive multi-exit inference** inspired by ePerceptive. The system dynamically adjusts inference complexity based on available energy budget:
+Adaptive multi-exit inference. The system adjusts complexity based on energy budget:
 
-- **High budget** (≥ 0.6): Full model (2 hidden layers, maximum accuracy)
-- **Medium budget** (0.3–0.6): Exit 1 (1 hidden layer, reduced accuracy)
-- **Low budget** (< 0.3): Linear formula (zero TFLite cost)
-
-The system **gracefully degrades** inference quality when energy is scarce, instead of using the same computational cost regardless of available budget.
-
----
+- **High budget** (≥ 0.6): Full model (2 hidden layers)
+- **Medium budget** (0.3–0.6): Exit 1 (1 hidden layer)
+- **Low budget** (< 0.3): Linear formula (no TFLite)
 
 ## 2. Implementation Overview
 
@@ -25,66 +17,55 @@ The system **gracefully degrades** inference quality when energy is scarce, inst
 
 ```
 EnergyAwarePath/EnergyAwarePath/
-├── Energy-Aware-Path.ino   ← orchestrazione principale, loop seriale
-├── config.h                ← costanti, Branch struct, checkpoints[], FEATURE_MIN/MAX
-├── sensors.h / sensors.cpp ← IMU init e acquisizione finestra ~1.2s a 100Hz
-├── features.h / features.cpp ← estrazione 5 feature da IMUWindow
-├── inference.h / inference.cpp ← TFLite Micro setup e invoke
-├── planner.h / planner.cpp ← costruzione feature vector, normalizzazione, decisione
-└── model.h                 ← modello quantizzato int8 come array C
+├── Energy-Aware-Path.ino
+├── config.h
+├── sensors.h/cpp
+├── features.h/cpp
+├── inference.h/cpp
+├── planner.h/cpp
+└── model.h
 ```
 
 ### 2.2 Model Architecture
-
-Multi-layer perceptron (MLP) with Keras:
 
 ```python
 Dense(16, relu) → Dense(8, relu) → Dense(1, sigmoid)
 ```
 
-- Input: 10 features (float32 normalized [0,1])
-- Output: predicted energy cost (float32, [0,1])
-- Quantization: full int8
-- Size: ~3.3 KB (flash)
-- Arena: ~712 B / 8 KB allocated
-- Latency: ~0.5 ms per invocation
+- Input: 10 features (normalized [0,1])
+- Output: energy cost ([0,1])
+- Quantization: int8
+- Size: ~3.3 KB
+- Arena: ~712 B / 8 KB
+- Latency: ~0.5 ms
 - Parameters: ~321
 
-### 2.3 Feature Vector (10 elements)
+### 2.3 Feature Vector
 
 ```
-[0] budget          float, [0.2, 1.0] → normalizzato
-[1] length          float, [0.2, 0.9] → normalizzato
-[2] turns/5         float, [0.0, 1.0] → già normalizzato
-[3] difficulty      float, [0.1, 0.9] → normalizzato
-[4] slope           float, [-0.3, 0.6] → normalizzato
-[5] acc_mean        float, [0.965, 2.005] → normalizzato
-[6] acc_std         float, [0.017, 0.749] → normalizzato
-[7] acc_peak        float, [1.038, 5.019] → normalizzato
-[8] gyro_mean       float, [0.745, 125.75] → normalizzato
-[9] tilt            float, [0.016, 44.64] → normalizzato
+[0] budget
+[1] length
+[2] turns/5
+[3] difficulty
+[4] slope
+[5] acc_mean
+[6] acc_std
+[7] acc_peak
+[8] gyro_mean
+[9] tilt
 ```
 
-FEATURE_MIN and FEATURE_MAX values are defined in `config.h`.
+FEATURE_MIN and FEATURE_MAX in `config.h`.
 
-### 2.4 Oracle Formula (fallback for low budget)
-
-Defined in `planner.cpp → planner_oracle_cost()`:
+### 2.4 Oracle Formula
 
 ```
 motion = (acc_std_norm + gyro_norm) / 2
 
-E = 0.18 × length
-  + 0.12 × turns/5
-  + 0.12 × difficulty
-  + 0.08 × |slope|
-  + 0.05 × acc_std_norm
-  + 0.05 × gyro_norm
-  + 0.05 × (1 - budget)
-  + 0.30 × length × motion
+E = 0.18 × length + 0.12 × turns/5 + 0.12 × difficulty
+  + 0.08 × |slope| + 0.05 × acc_std_norm + 0.05 × gyro_norm
+  + 0.05 × (1 - budget) + 0.30 × length × motion
 ```
-
-Where `acc_std_norm` and `gyro_norm` are features at indices 6 and 8 **after** normalization.
 
 ### 2.5 Policy Enum
 
