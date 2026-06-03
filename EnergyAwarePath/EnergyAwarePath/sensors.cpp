@@ -4,16 +4,10 @@
 
 bool sensors_init() {
   if (!IMU.begin()) {
-    Serial.println("ERROR: IMU initialization failed!");
+    Serial.println("IMU init failed");
     return false;
   }
-  Serial.println("IMU initialized (LSM9DS1)");
-  Serial.print("  Accelerometer sample rate: ");
-  Serial.print(IMU.accelerationSampleRate());
-  Serial.println(" Hz");
-  Serial.print("  Gyroscope sample rate: ");
-  Serial.print(IMU.gyroscopeSampleRate());
-  Serial.println(" Hz");
+  Serial.println("IMU ready (LSM9DS1)");
   return true;
 }
 
@@ -23,16 +17,12 @@ bool sensors_acquire_window(IMUWindow &window) {
   unsigned long start_time = micros();
   unsigned long next_sample = start_time;
   
-  Serial.println("  Acquiring IMU data...");
+  Serial.println("  Acquiring...");
   
   while (window.count < NUM_SAMPLES) {
-    // Wait for next sample time (non-blocking timing)
-    while (micros() < next_sample) {
-      // Spin wait — no delay()
-    }
+    while (micros() < next_sample) {}
     next_sample += SAMPLE_INTERVAL_US;
     
-    // Read accelerometer
     if (IMU.accelerationAvailable() && IMU.gyroscopeAvailable()) {
       float ax, ay, az, gx, gy, gz;
       IMU.readAcceleration(ax, ay, az);
@@ -49,11 +39,11 @@ bool sensors_acquire_window(IMUWindow &window) {
   }
   
   unsigned long elapsed = micros() - start_time;
-  Serial.print("  Window acquired: ");
+  Serial.print("  Done: ");
   Serial.print(window.count);
-  Serial.print(" samples in ");
+  Serial.print(" samples (");
   Serial.print(elapsed / 1000);
-  Serial.println(" ms");
+  Serial.println(" ms)");
   
   return (window.count == NUM_SAMPLES);
 }

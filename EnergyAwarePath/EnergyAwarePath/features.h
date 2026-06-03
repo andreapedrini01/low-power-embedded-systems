@@ -3,16 +3,14 @@
 
 #include "sensors.h"
 
-// Extracted sensor features
 struct SensorFeatures {
-  float acc_mean;   // mean acceleration magnitude
-  float acc_std;    // std dev of acceleration magnitude
-  float acc_peak;   // max acceleration magnitude
-  float gyro_mean;  // mean gyroscope magnitude
-  float tilt;       // tilt angle in degrees
+  float acc_mean;
+  float acc_std;
+  float acc_peak;
+  float gyro_mean;
+  float tilt;
 };
 
-// Extract features from an IMU window
 void features_extract(const IMUWindow &window, SensorFeatures &features);
 
-#endif // FEATURES_H
+#endif

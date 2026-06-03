@@ -7,7 +7,6 @@ void planner_normalize(float features[NUM_FEATURES]) {
     float range = FEATURE_MAX[i] - FEATURE_MIN[i];
     if (range < 0.0001f) range = 1.0f;
     features[i] = (features[i] - FEATURE_MIN[i]) / range;
-    // Clamp to [0, 1]
     if (features[i] < 0.0f) features[i] = 0.0f;
     if (features[i] > 1.0f) features[i] = 1.0f;
   }
@@ -17,7 +16,7 @@ void planner_build_features(float budget, const Branch &branch,
                             const SensorFeatures &sensor, float out[NUM_FEATURES]) {
   out[0] = budget;
   out[1] = branch.length;
-  out[2] = (float)branch.turns / 5.0f;  // normalize turns to 0-1
+  out[2] = (float)branch.turns / 5.0f;
   out[3] = branch.difficulty;
   out[4] = branch.slope;
   out[5] = sensor.acc_mean;
@@ -29,10 +28,6 @@ void planner_build_features(float budget, const Branch &branch,
 
 float planner_oracle_cost(float budget, const Branch &branch,
                           const SensorFeatures &sensor) {
-  // Same formula used to generate training labels.
-  // Sensor features are normalized using FEATURE_MIN/MAX to stay in [0,1].
-  
-  // Index 6 = acc_std, Index 8 = gyro_mean (in FEATURE_MIN/MAX arrays)
   float acc_std_range = FEATURE_MAX[6] - FEATURE_MIN[6];
   float gyro_range    = FEATURE_MAX[8] - FEATURE_MIN[8];
   if (acc_std_range < 0.0001f) acc_std_range = 1.0f;
@@ -69,7 +64,6 @@ Decision planner_decide(int checkpoint_idx, float budget,
   
   const Branch* branches = checkpoints[checkpoint_idx];
   
-  // --- ML Policy ---
   if (policy == POLICY_ML) {
     for (int b = 0; b < NUM_BRANCHES; b++) {
       float feat[NUM_FEATURES];
@@ -81,7 +75,6 @@ Decision planner_decide(int checkpoint_idx, float budget,
       dec.inference_time_us += lat;
     }
     
-    // Find minimum cost branch
     int best = 0;
     for (int b = 1; b < NUM_BRANCHES; b++) {
       if (dec.predicted_costs[b] < dec.predicted_costs[best]) {
@@ -89,11 +82,8 @@ Decision planner_decide(int checkpoint_idx, float budget,
       }
     }
     
-    // Safety margin check
     if (budget < SAFETY_MARGIN) {
-      // If best branch costs more than 50% of remaining budget, try alternatives
       if (dec.predicted_costs[best] > 0.5f * budget) {
-        // Find the cheapest that doesn't exceed safety threshold
         int safest = best;
         float min_safe_cost = dec.predicted_costs[best];
         for (int b = 0; b < NUM_BRANCHES; b++) {
@@ -112,7 +102,6 @@ Decision planner_decide(int checkpoint_idx, float budget,
     dec.selected_branch = best;
     dec.selected_cost = dec.predicted_costs[best];
   }
-  // --- Always-A Policy ---
   else if (policy == POLICY_ALWAYS_A) {
     for (int b = 0; b < NUM_BRANCHES; b++) {
       dec.predicted_costs[b] = planner_oracle_cost(budget, branches[b], sensor);
@@ -120,7 +109,6 @@ Decision planner_decide(int checkpoint_idx, float budget,
     dec.selected_branch = 0;
     dec.selected_cost = dec.predicted_costs[0];
   }
-  // --- Shortest Policy ---
   else if (policy == POLICY_SHORTEST) {
     int shortest = 0;
     for (int b = 0; b < NUM_BRANCHES; b++) {
@@ -132,7 +120,6 @@ Decision planner_decide(int checkpoint_idx, float budget,
     dec.selected_branch = shortest;
     dec.selected_cost = dec.predicted_costs[shortest];
   }
-  // --- Random Policy ---
   else if (policy == POLICY_RANDOM) {
     for (int b = 0; b < NUM_BRANCHES; b++) {
       dec.predicted_costs[b] = planner_oracle_cost(budget, branches[b], sensor);
@@ -140,7 +127,6 @@ Decision planner_decide(int checkpoint_idx, float budget,
     dec.selected_branch = random(0, NUM_BRANCHES);
     dec.selected_cost = dec.predicted_costs[dec.selected_branch];
   }
-  // --- Oracle Policy (uses formula directly) ---
   else if (policy == POLICY_ORACLE) {
     for (int b = 0; b < NUM_BRANCHES; b++) {
       dec.predicted_costs[b] = planner_oracle_cost(budget, branches[b], sensor);
@@ -154,7 +140,6 @@ Decision planner_decide(int checkpoint_idx, float budget,
     dec.selected_branch = best;
     dec.selected_cost = dec.predicted_costs[best];
   }
-  // --- Adaptive Policy (selects exit based on budget) ---
   else if (policy == POLICY_ADAPTIVE) {
     unsigned long total_lat = 0;
     for (int b = 0; b < NUM_BRANCHES; b++) {
@@ -162,7 +147,6 @@ Decision planner_decide(int checkpoint_idx, float budget,
       planner_build_features(budget, branches[b], sensor, feat);
       planner_normalize(feat);
       
-      // Pre-compute oracle cost (used as fallback if budget low)
       float oracle_cost = planner_oracle_cost(budget, branches[b], sensor);
       
       unsigned long lat = 0;
@@ -171,7 +155,6 @@ Decision planner_decide(int checkpoint_idx, float budget,
     }
     dec.inference_time_us = total_lat;
     
-    // Find minimum cost branch
     int best = 0;
     for (int b = 1; b < NUM_BRANCHES; b++) {
       if (dec.predicted_costs[b] < dec.predicted_costs[best]) {
@@ -179,7 +162,6 @@ Decision planner_decide(int checkpoint_idx, float budget,
       }
     }
     
-    // Safety margin check (same logic as POLICY_ML)
     if (budget < SAFETY_MARGIN) {
       if (dec.predicted_costs[best] > 0.5f * budget) {
         int safest = best;

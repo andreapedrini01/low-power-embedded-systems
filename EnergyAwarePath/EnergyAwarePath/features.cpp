@@ -12,7 +12,6 @@ void features_extract(const IMUWindow &window, SensorFeatures &features) {
   float ax_sum = 0.0f;
   float az_sum = 0.0f;
   
-  // First pass: compute magnitudes and sums
   for (int i = 0; i < window.count; i++) {
     float am = sqrtf(window.ax[i] * window.ax[i] +
                      window.ay[i] * window.ay[i] +
@@ -37,7 +36,6 @@ void features_extract(const IMUWindow &window, SensorFeatures &features) {
   float acc_mean = acc_sum / n;
   float gyro_mean = gyro_sum / n;
   
-  // Second pass: compute standard deviation
   float acc_var_sum = 0.0f;
   for (int i = 0; i < n; i++) {
     float diff = acc_mag[i] - acc_mean;
@@ -45,13 +43,11 @@ void features_extract(const IMUWindow &window, SensorFeatures &features) {
   }
   float acc_std = sqrtf(acc_var_sum / n);
   
-  // Tilt from gravity vector
   float mean_ax = ax_sum / n;
   float mean_az = az_sum / n;
   float tilt_rad = atan2f(fabsf(mean_ax), fabsf(mean_az));
   float tilt_deg = tilt_rad * 180.0f / 3.14159265f;
   
-  // Store results
   features.acc_mean  = acc_mean;
   features.acc_std   = acc_std;
   features.acc_peak  = acc_max;
