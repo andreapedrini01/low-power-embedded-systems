@@ -1,5 +1,6 @@
 #include "sensors.h"
 #include "config.h"
+#include "power.h"
 #include <Arduino_LSM9DS1.h>
 
 bool sensors_init() {
@@ -20,6 +21,16 @@ bool sensors_acquire_window(IMUWindow &window) {
   Serial.println("  Acquiring...");
   
   while (window.count < NUM_SAMPLES) {
+#if SLEEP_DURING_SAMPLING
+    // Sleep most of the inter-sample gap, busy-wait the tail for accuracy.
+    unsigned long now_us = micros();
+    if (next_sample > now_us) {
+      unsigned long wait_us = next_sample - now_us;
+      if (wait_us > 1500) {
+        power_sleep(SLEEP_LIGHT, (wait_us - 500) / 1000);
+      }
+    }
+#endif
     while (micros() < next_sample) {}
     next_sample += SAMPLE_INTERVAL_US;
     

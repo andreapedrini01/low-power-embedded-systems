@@ -63,6 +63,24 @@ extern int   OUTPUT_ZERO;
 #define BUDGET_HIGH_THRESHOLD   0.6f
 #define BUDGET_LOW_THRESHOLD    0.3f
 #define TENSOR_ARENA_EXIT1_SIZE 4096
+
+// Power model. See ENERGY_EXTENSION.md section 0 for sources.
+// Update only after a direct measurement on this board.
+#define V_BUS              5.2f      // V, USB supply (measured)
+#define I_ACTIVE_MA        32.0f     // mA, board running (measured)
+#define I_LIGHT_SLEEP_UA   300.0f    // uA, light sleep (community)
+#define I_DEEP_SLEEP_UA    5.0f      // uA, deep sleep (community)
+
+// Sleep policy.
+#define SLEEP_BETWEEN_CHECKPOINTS 1   // 0 = busy wait, 1 = sleep
+#define SLEEP_DURING_SAMPLING     1   // 0 = busy poll, 1 = light sleep
+#define MAIN_LOOP_SLEEP_MS        200 // sleep slot when idle in main loop
+
+// Adaptive sleep tuning (deep sleep slot after a checkpoint).
+#define ADAPTIVE_SLEEP_LOW_MS    2000
+#define ADAPTIVE_SLEEP_MID_MS     500
+#define ADAPTIVE_SLEEP_HIGH_MS      0
+
 enum Policy {
   POLICY_ML = 0,
   POLICY_ALWAYS_A,

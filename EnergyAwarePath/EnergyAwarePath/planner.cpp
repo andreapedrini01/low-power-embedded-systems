@@ -61,6 +61,8 @@ Decision planner_decide(int checkpoint_idx, float budget,
   Decision dec;
   dec.safety_override = false;
   dec.inference_time_us = 0;
+  dec.active_time_us = 0;
+  dec.energy_uj = 0.0f;
   
   const Branch* branches = checkpoints[checkpoint_idx];
   
@@ -184,4 +186,11 @@ Decision planner_decide(int checkpoint_idx, float budget,
   }
   
   return dec;
+}
+
+unsigned long planner_post_checkpoint_sleep_ms(float budget, Policy policy) {
+  if (policy != POLICY_ADAPTIVE) return 0;
+  if (budget >= BUDGET_HIGH_THRESHOLD) return ADAPTIVE_SLEEP_HIGH_MS;
+  if (budget >= BUDGET_LOW_THRESHOLD)  return ADAPTIVE_SLEEP_MID_MS;
+  return ADAPTIVE_SLEEP_LOW_MS;
 }

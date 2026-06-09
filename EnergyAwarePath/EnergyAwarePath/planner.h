@@ -9,6 +9,8 @@ struct Decision {
   float predicted_costs[NUM_BRANCHES];
   float selected_cost;
   unsigned long inference_time_us;
+  unsigned long active_time_us;     // total active time of decide()
+  float         energy_uj;          // estimated energy of decide()
   bool  safety_override;
 };
 
@@ -22,5 +24,7 @@ Decision planner_decide(int checkpoint_idx, float budget,
 
 float planner_oracle_cost(float budget, const Branch &branch,
                           const SensorFeatures &sensor);
+
+unsigned long planner_post_checkpoint_sleep_ms(float budget, Policy policy);
 
 #endif

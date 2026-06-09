@@ -8,6 +8,7 @@
 #include "features.h"
 #include "inference.h"
 #include "planner.h"
+#include "power.h"
 
 static float energy_budget = INITIAL_BUDGET;
 static int   current_checkpoint = 0;
@@ -20,6 +21,11 @@ static SensorFeatures sensor_features;
 static float total_cost_ml = 0.0f;
 static float total_cost_oracle = 0.0f;
 static int   checkpoints_completed = 0;
+
+void run_checkpoint();
+void print_summary();
+void reset_mission();
+void run_batch_compare();
 
 // =============================================================================
 // SETUP
@@ -46,6 +52,8 @@ void setup() {
     Serial.println("WARNING: Exit-1 model init failed");
   }
   
+  power_init();
+  
   Serial.println();
   Serial.println("System ready");
   Serial.print("Budget: ");
@@ -53,7 +61,7 @@ void setup() {
   Serial.print("Checkpoints: ");
   Serial.println(NUM_CHECKPOINTS);
   Serial.println();
-  Serial.println("Commands: n=next, r=reset, s=summary, 1-6=policy");
+  Serial.println("Commands: n=next, r=reset, s=summary, b=batch, 1-6=policy");
   Serial.println();
   
   randomSeed(analogRead(0));
@@ -84,6 +92,10 @@ void loop() {
         
       case 'r':
         reset_mission();
+        break;
+        
+      case 'b':
+        run_batch_compare();
         break;
         
       case '1':
@@ -118,6 +130,10 @@ void loop() {
       default:
         break;
     }
+  } else {
+#if SLEEP_BETWEEN_CHECKPOINTS
+    power_sleep(SLEEP_DEEP, MAIN_LOOP_SLEEP_MS);
+#endif
   }
 }
 
@@ -133,12 +149,17 @@ void run_checkpoint() {
   Serial.print("Budget: ");
   Serial.println(energy_budget, 3);
   
+  power_checkpoint_reset();
+  
+  // Sensor + feature extraction (counted as active).
+  power_mark_active_begin();
   if (!sensors_acquire_window(imu_window)) {
+    power_mark_active_end();
     Serial.println("ERROR: IMU acquisition failed");
     return;
   }
-  
   features_extract(imu_window, sensor_features);
+  power_mark_active_end();
   
   Serial.print("Context: acc=");
   Serial.print(sensor_features.acc_mean, 2);
@@ -153,9 +174,17 @@ void run_checkpoint() {
   Serial.println("°");
   Serial.println();
   
+  // Decision call: bracketed, delta written into Decision fields.
+  EnergyAccount e_before = power_checkpoint_get();
+  power_mark_active_begin();
   Decision dec = planner_decide(current_checkpoint, energy_budget,
                                 sensor_features, current_policy);
+  power_mark_active_end();
+  EnergyAccount e_after = power_checkpoint_get();
+  dec.active_time_us = e_after.active_us - e_before.active_us;
+  dec.energy_uj      = e_after.energy_uj - e_before.energy_uj;
   
+  // Oracle comparison: not bracketed (negligible time).
   Decision oracle_dec = planner_decide(current_checkpoint, energy_budget,
                                        sensor_features, POLICY_ORACLE);
   
@@ -206,6 +235,25 @@ void run_checkpoint() {
     if (lvl == EXIT_LINEAR) Serial.println("LINEAR");
   }
   
+  // Post-checkpoint sleep (adaptive only) and per-checkpoint energy log.
+  unsigned long sleep_ms = planner_post_checkpoint_sleep_ms(energy_budget, current_policy);
+  if (sleep_ms > 0) {
+    power_sleep(SLEEP_DEEP, sleep_ms);
+  }
+  
+  EnergyAccount ckp = power_checkpoint_get();
+  Serial.print("Active: ");
+  Serial.print(ckp.active_us / 1000.0f, 1);
+  Serial.println(" ms");
+  Serial.print("Sleep:  ");
+  Serial.print(ckp.light_sleep_us / 1000UL);
+  Serial.print(" ms light + ");
+  Serial.print(ckp.deep_sleep_us / 1000UL);
+  Serial.println(" ms deep");
+  Serial.print("Energy: ");
+  Serial.print(ckp.energy_uj / 1000.0f, 2);
+  Serial.println(" mJ (est)");
+  
   total_cost_ml += dec.selected_cost;
   total_cost_oracle += oracle_dec.selected_cost;
   checkpoints_completed++;
@@ -238,6 +286,10 @@ void run_checkpoint() {
 // =============================================================================
 
 void print_summary() {
+  EnergyAccount tot = power_total_get();
+  unsigned long total_us = tot.active_us + tot.light_sleep_us + tot.deep_sleep_us;
+  float baseline_uj = power_energy_uj(total_us, 0, 0);
+  
   Serial.println();
   Serial.println("---------- SUMMARY ----------");
   Serial.print("Checkpoints: ");
@@ -246,7 +298,7 @@ void print_summary() {
   Serial.println(NUM_CHECKPOINTS);
   Serial.print("Final budget: ");
   Serial.println(energy_budget, 3);
-  Serial.print("Energy consumed: ");
+  Serial.print("Energy consumed (sim): ");
   Serial.println(1.0f - energy_budget, 3);
   Serial.println();
   
@@ -261,6 +313,31 @@ void print_summary() {
     Serial.print(eff, 1);
     Serial.println("%");
   }
+  Serial.println();
+  
+  Serial.print("Active time:  ");
+  Serial.print(tot.active_us / 1000UL);
+  Serial.println(" ms");
+  Serial.print("Sleep time:   ");
+  Serial.print((tot.light_sleep_us + tot.deep_sleep_us) / 1000UL);
+  Serial.print(" ms (light: ");
+  Serial.print(tot.light_sleep_us / 1000UL);
+  Serial.print(" ms, deep: ");
+  Serial.print(tot.deep_sleep_us / 1000UL);
+  Serial.println(" ms)");
+  Serial.print("Energy (est): ");
+  Serial.print(tot.energy_uj / 1000.0f, 2);
+  Serial.println(" mJ");
+  
+  if (baseline_uj > 0.001f) {
+    float savings = (baseline_uj - tot.energy_uj) / baseline_uj * 100.0f;
+    Serial.print("vs Always-Full+no-sleep: ");
+    Serial.print(baseline_uj / 1000.0f, 2);
+    Serial.println(" mJ");
+    Serial.print("Savings: ");
+    Serial.print(savings, 1);
+    Serial.println("%");
+  }
   
   Serial.println("-----------------------------");
   Serial.println();
@@ -273,6 +350,7 @@ void reset_mission() {
   total_cost_ml = 0.0f;
   total_cost_oracle = 0.0f;
   checkpoints_completed = 0;
+  power_init();
   
   Serial.println();
   Serial.println("=== RESET ===");
@@ -281,3 +359,62 @@ void reset_mission() {
   Serial.println("Press 'n' to start");
   Serial.println();
 }
+
+// =============================================================================
+// BATCH COMPARISON
+// =============================================================================
+
+void run_batch_compare() {
+  Serial.println();
+  Serial.println("---- BATCH (shared sensor window) ----");
+  
+  // Isolate batch from mission accounting.
+  PowerState saved;
+  power_save(saved);
+  
+  if (!sensors_acquire_window(imu_window)) {
+    Serial.println("Batch: sensor failed");
+    power_restore(saved);
+    return;
+  }
+  features_extract(imu_window, sensor_features);
+  
+  const Policy ps[]    = {POLICY_ML, POLICY_ADAPTIVE, POLICY_ALWAYS_A, POLICY_SHORTEST};
+  const char*  names[] = {"ML       ", "Adaptive ", "Always-A ", "Shortest "};
+  const int N = sizeof(ps) / sizeof(ps[0]);
+  
+  Serial.println("Policy    Cost   Active(ms)  Sleep(ms)  Energy(mJ est)");
+  
+  for (int i = 0; i < N; i++) {
+    float budget = INITIAL_BUDGET;
+    unsigned long active_us = 0;
+    unsigned long sleep_us  = 0;
+    float total_cost = 0.0f;
+    
+    for (int c = 0; c < NUM_CHECKPOINTS; c++) {
+      unsigned long t0 = micros();
+      Decision d = planner_decide(c, budget, sensor_features, ps[i]);
+      active_us += micros() - t0;
+      sleep_us  += planner_post_checkpoint_sleep_ms(budget, ps[i]) * 1000UL;
+      total_cost += d.selected_cost;
+      budget -= d.selected_cost;
+      if (budget < 0.0f) { budget = 0.0f; break; }
+    }
+    
+    float energy_uj = power_energy_uj(active_us, 0, sleep_us);
+    
+    Serial.print(names[i]);
+    Serial.print(total_cost, 3);
+    Serial.print("  ");
+    Serial.print(active_us / 1000.0f, 1);
+    Serial.print("        ");
+    Serial.print(sleep_us / 1000UL);
+    Serial.print("       ");
+    Serial.println(energy_uj / 1000.0f, 2);
+  }
+  Serial.println("--------------------------------------");
+  Serial.println();
+  
+  power_restore(saved);
+}
+
