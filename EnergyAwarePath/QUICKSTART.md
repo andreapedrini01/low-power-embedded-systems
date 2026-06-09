@@ -5,7 +5,8 @@
 ```
 EnergyAwarePath/
 ├── README.md                                        ← Start here (overview + results)
-├── ADAPTIVE_EXTENSION.md                            ← Technical details
+├── ADAPTIVE_EXTENSION.md                            ← Adaptive multi-exit spec
+├── ENERGY_EXTENSION.md                              ← Energy model and sleep spec
 ├── QUICKSTART.md                                    ← This file
 ├── EnergyAwarePath_Training_MultiExit_COMPLETE.ipynb  ← Training notebook
 └── EnergyAwarePath/                                 ← Arduino sketch (ready to upload)
@@ -27,23 +28,27 @@ EnergyAwarePath/
 ```
 6    ← Enable adaptive policy
 n    ← Run checkpoint (repeat 4 times)
-s    ← Show summary
+s    ← Show summary (energy, savings)
+b    ← Batch comparison across all policies
 ```
 
 ## 📊 What to Expect
 
-| Checkpoint | Budget | Exit Used | Latency |
-|------------|--------|-----------|---------|
-| 1 | 1.0 | Full model | ~0.55 ms |
-| 2 | ~0.8 | Full model | ~0.55 ms |
-| 3 | ~0.4 | Exit 1 | ~0.41 ms |
-| 4 | ~0.2 | Linear formula | 0 ms |
+| Checkpoint | Budget | Exit Used      | Inference | Post-checkpoint sleep |
+|------------|--------|----------------|-----------|-----------------------|
+| 1          | 1.0    | Full model     | ~0.55 ms  | 0 ms                  |
+| 2          | ~0.8   | Full model     | ~0.55 ms  | 0 ms                  |
+| 3          | ~0.4   | Exit 1         | ~0.41 ms  | 500 ms (deep)         |
+| 4          | ~0.2   | Linear formula | 0 ms      | 2000 ms (deep)        |
 
-**Key Result:** System automatically reduces inference complexity as energy budget decreases.
+**Key Result:** System reduces both inference complexity *and* idle current as
+the energy budget decreases. Mission summary reports total energy (estimated)
+and savings vs an Always-Full + no-sleep baseline.
 
 ## 📖 Documentation
 
 - **README.md**: Complete overview, architecture, results
-- **ADAPTIVE_EXTENSION.md**: Implementation details, code structure
+- **ADAPTIVE_EXTENSION.md**: Multi-exit model and adaptive inference details
+- **ENERGY_EXTENSION.md**: Power model, sleep API, energy accounting
 - **This file**: Quick reference
 
