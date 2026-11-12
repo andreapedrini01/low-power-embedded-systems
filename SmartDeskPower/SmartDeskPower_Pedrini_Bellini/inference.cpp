@@ -1,5 +1,5 @@
 #include "inference.h"
-#include "model.h"
+#include "active_model.h"
 #include <math.h>
 
 // Hand-coded float MLP forward pass (Assignment 1 style).

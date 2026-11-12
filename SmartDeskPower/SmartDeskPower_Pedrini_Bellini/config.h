@@ -12,11 +12,21 @@
 #define N_CLASSES   5
 #define N_FEATURES  33   // 8 stats × 4 channels + 1 burstiness
 
+// ── Model Selection (Base vs. Fine-Tuned) ──
+// Uncomment to use the calibrated model (model_finetuned.h)
+// Keep commented to use the original reference model (model.h)
+// #define USE_FINETUNED_MODEL
+
 // ── Decision policy / state machine ──
-#define GATE_RMS         0.020f  // vibration RMS gate (g, mean-removed); tune from dataset
-#define ACT_CONSECUTIVE  2       // activity windows required before POWER ON
-#define IDLE_TIMEOUT_MS  12000   // cut load after this inactivity (short for demo)
-#define ACT_THRESHOLD    0.60f   // min softmax confidence to accept a class
+#define GATE_RMS             0.0015f // vibration RMS gate (g, mean-removed); separates idle noise (<0.0012) from light typing (>0.0020)
+#define ACT_CONSECUTIVE      2       // activity windows required before POWER ON
+#define IDLE_TIMEOUT_MS      12000   // cut load after this inactivity (short for demo)
+#define ACT_THRESHOLD        0.50f   // min softmax confidence to accept a class (balanced for 5 classes)
+
+// ── Low-power sniffing mode ──
+#define SNIFF_INTERVAL_MS    250     // wake every 250 ms in sniffing mode (4 Hz)
+#define WAKE_DELTA_G         0.0060f // single-sample accel delta to exit sniffing
+#define SNIFF_FALLBACK_WIN   3       // consecutive quiet windows required before returning to sniffing (hysteresis)
 
 // ── Power model (est). Board-level active/sleep is TBC; reused from EnergyAwarePath. ──
 #define V_BUS             5.2f    // V, USB supply (measured, as EnergyAwarePath)

@@ -16,7 +16,7 @@
 #include "features.h"
 #include "inference.h"
 #include "power.h"
-#include "model.h"
+#include "active_model.h"
 
 static AccelWindow window;
 static float       feat[N_FEATURES];
@@ -24,8 +24,10 @@ static float       scores[N_CLASSES];
 
 // State machine
 static bool          monitoring           = false;
+static bool          sniffing             = true;   // Low-power 4 Hz sniffing state
 static bool          load_on              = false;
 static int           consecutive_activity = 0;
+static int           quiet_windows        = 0;      // Consecutive quiet windows for sniffing fallback
 static unsigned long last_activity_ms     = 0;
 
 void record_window();
@@ -91,14 +93,20 @@ void loop() {
         break;
       case 'm':
         monitoring = !monitoring;
+        sniffing = true;
+        quiet_windows = 0;
+        consecutive_activity = 0;
         Serial.print("Monitor mode: ");
-        Serial.println(monitoring ? "STARTED" : "STOPPED");
+        Serial.println(monitoring ? "STARTED (Duty-Cycled Sniffing @ 4 Hz)" : "STOPPED");
         break;
       case 's':
         power_print_summary();
         break;
       case 'q':
         monitoring = false;
+        sniffing = true;
+        quiet_windows = 0;
+        consecutive_activity = 0;
         Serial.println("Monitor mode: STOPPED");
         break;
       default:
@@ -213,9 +221,27 @@ void classify_single() {
   }
 }
 
-// MONITOR MODE (CONTINUOUS)
+// MONITOR MODE (CONTINUOUS WITH LOW-POWER SNIFFING & HYSTERESIS)
 
 void step_monitor() {
+  // ── State 1: Low-power sniffing (4 Hz, CPU active < 0.1%) ──
+  if (sniffing) {
+    float delta = sensors_read_single_delta();
+    if (delta < WAKE_DELTA_G) {
+      // Sub-threshold background: sleep 250 ms in System ON Idle
+      power_sniff_sleep(SNIFF_INTERVAL_MS);
+      return;
+    }
+
+    // Mechanical vibration detected: wake up into active sensing
+    Serial.print("[WAKE] Motion detected (delta=");
+    Serial.print(delta, 4);
+    Serial.println(" g), capturing 119 Hz window...");
+    sniffing = false;
+    quiet_windows = 0;
+  }
+
+  // ── State 2: Active sensing (119 Hz window, feature extraction & inference) ──
   if (!sensors_acquire_window(window)) {
     return;
   }
@@ -255,12 +281,14 @@ void step_monitor() {
 
   if (is_activity) {
     consecutive_activity++;
+    quiet_windows = 0;
     last_activity_ms = now_ms;
     if (!load_on && consecutive_activity >= ACT_CONSECUTIVE) {
       set_load_power(true);
     }
   } else {
     consecutive_activity = 0;
+    quiet_windows++;
     if (load_on && (now_ms - last_activity_ms > IDLE_TIMEOUT_MS)) {
       set_load_power(false);
     }
@@ -277,6 +305,12 @@ void step_monitor() {
   Serial.print(" | LOAD: ");
   Serial.println(load_on ? "ON" : "OFF");
 
-  // Inter-window sleep for low power
-  power_sleep(100);
+  // Hysteresis fallback: only return to sniffing if load is OFF and we observe SNIFF_FALLBACK_WIN consecutive quiet windows
+  if (!load_on && quiet_windows >= SNIFF_FALLBACK_WIN) {
+    sniffing = true;
+    Serial.println("[SNIFF] Quiet surface & load OFF -> returning to low-power sniffing (4 Hz)");
+  } else {
+    // Inter-window sleep during active tracking
+    power_sleep(100);
+  }
 }

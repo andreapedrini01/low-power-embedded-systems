@@ -14,5 +14,6 @@ struct AccelWindow {
 
 bool sensors_init();
 bool sensors_acquire_window(AccelWindow &w);
+float sensors_read_single_delta();
 
 #endif

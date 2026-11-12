@@ -8,9 +8,11 @@ void power_init();
 void power_mark_active_begin();
 void power_mark_active_end();
 void power_sleep(unsigned long ms);
+void power_sniff_sleep(unsigned long ms);
 
 unsigned long power_active_us();
 unsigned long power_sleep_us();
+unsigned long power_sniff_us();
 float power_board_energy_mj();   // (est)
 
 // ── Desk load tracking ──

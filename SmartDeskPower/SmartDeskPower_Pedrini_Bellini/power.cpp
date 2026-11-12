@@ -7,6 +7,7 @@ static bool          active_open = false;
 static unsigned long active_start_us;
 static unsigned long total_active_us;
 static unsigned long total_sleep_us;
+static unsigned long total_sniff_us;
 
 // ── Desk load tracking ──
 
@@ -22,6 +23,7 @@ void power_init() {
   active_open       = false;
   total_active_us   = 0;
   total_sleep_us    = 0;
+  total_sniff_us    = 0;
   load_flag         = false;
   total_load_on_us  = 0;
   total_load_off_us = 0;
@@ -51,13 +53,24 @@ void power_sleep(unsigned long ms) {
   if (was) power_mark_active_begin();
 }
 
+// Low-power duty-cycled sniffing sleep
+void power_sniff_sleep(unsigned long ms) {
+  bool was = active_open;
+  if (was) power_mark_active_end();
+  unsigned long t0 = micros();
+  delay(ms);
+  total_sniff_us += micros() - t0;
+  if (was) power_mark_active_begin();
+}
+
 unsigned long power_active_us() { return total_active_us; }
 unsigned long power_sleep_us()  { return total_sleep_us; }
+unsigned long power_sniff_us()  { return total_sniff_us; }
 
 // Board energy from duty cycle and config.h current constants (est).
 float power_board_energy_mj() {
   float a_ms = total_active_us / 1000.0f;
-  float s_ms = total_sleep_us  / 1000.0f;
+  float s_ms = (total_sleep_us + total_sniff_us) / 1000.0f;
   float e_uj = V_BUS * (I_ACTIVE_MA * a_ms +
                         I_LIGHT_SLEEP_UA * 0.001f * s_ms);
   return e_uj / 1000.0f;
@@ -109,7 +122,7 @@ void power_print_summary() {
     total_load_off_us += now - load_change_us;
   load_change_us = now;
 
-  float total_s = (total_active_us + total_sleep_us) / 1e6f;
+  float total_s = (total_active_us + total_sleep_us + total_sniff_us) / 1e6f;
   float duty    = total_s > 0
                   ? (total_active_us / 1e6f / total_s * 100.0f) : 0;
 
@@ -120,6 +133,8 @@ void power_print_summary() {
   Serial.print(total_active_us/1000); Serial.println(" ms");
   Serial.print("Sleep:        ");
   Serial.print(total_sleep_us/1000);  Serial.println(" ms");
+  Serial.print("Sniffing:     ");
+  Serial.print(total_sniff_us/1000);  Serial.println(" ms");
   Serial.print("Active duty:  ");
   Serial.print(duty, 1);             Serial.println(" % (est)");
   Serial.print("Board energy: ");

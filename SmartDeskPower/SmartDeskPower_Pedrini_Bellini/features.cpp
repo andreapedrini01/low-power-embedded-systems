@@ -1,5 +1,5 @@
 #include "features.h"
-#include "model.h"
+#include "active_model.h"
 #include <math.h>
 
 // ── Per-channel statistics (8 features) ──
