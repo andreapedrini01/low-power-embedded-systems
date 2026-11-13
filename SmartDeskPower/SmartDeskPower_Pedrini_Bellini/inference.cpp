@@ -2,44 +2,58 @@
 #include "active_model.h"
 #include <math.h>
 
-// Hand-coded float MLP forward pass (Assignment 1 style).
-// Weights laid out row-major (in × out), matching Keras Dense export.
-
+/*
+ * Initializes inference resources.
+ * Returns true as all network weights and biases are statically stored in flash.
+ */
 bool inference_init() {
-  // No runtime init needed for hand-coded MLP
   return true;
 }
 
-// ── Dense layer ──
-
+/*
+ * Computes a fully connected layer: out = ReLU(w * in + b) or out = w * in + b.
+ * Weights are indexed in row-major order: w[i * n_out + j].
+ */
 static void dense(const float *in, const float *w, const float *b,
                   float *out, int n_in, int n_out, bool relu) {
   for (int j = 0; j < n_out; j++) {
     float sum = b[j];
-    for (int i = 0; i < n_in; i++)
+    for (int i = 0; i < n_in; i++) {
       sum += in[i] * w[i * n_out + j];
-    out[j] = (relu && sum < 0) ? 0 : sum;
+    }
+    out[j] = (relu && sum < 0.0f) ? 0.0f : sum;
   }
 }
 
-// ── Softmax (numerically stable) ──
-
+/*
+ * Normalizes an array of raw logits into probabilities via softmax.
+ * Subtracts the maximum element prior to exponentiation to prevent numerical overflow.
+ */
 static void softmax(float *v, int n) {
   float mx = v[0];
-  for (int i = 1; i < n; i++)
+  for (int i = 1; i < n; i++) {
     if (v[i] > mx) mx = v[i];
-  float sum = 0;
+  }
+
+  float sum = 0.0f;
   for (int i = 0; i < n; i++) {
     v[i] = expf(v[i] - mx);
     sum += v[i];
   }
-  for (int i = 0; i < n; i++) v[i] /= sum;
+
+  for (int i = 0; i < n; i++) {
+    v[i] /= sum;
+  }
 }
 
-// ── Forward pass ──
-
+/*
+ * Evaluates the 3-layer MLP over the 33 normalized input features.
+ * Computes layer 1 (33->12, ReLU), layer 2 (12->6, ReLU), and layer 3 (6->5, Softmax).
+ * Returns the class index with the highest probability.
+ */
 int inference_run(const float features[N_FEATURES], float scores[N_CLASSES]) {
-  float h1[L1_OUT], h2[L2_OUT];
+  float h1[L1_OUT];
+  float h2[L2_OUT];
 
   dense(features, MLP_W1, MLP_B1, h1,     L1_IN, L1_OUT, true);
   dense(h1,       MLP_W2, MLP_B2, h2,     L2_IN, L2_OUT, true);
@@ -47,7 +61,10 @@ int inference_run(const float features[N_FEATURES], float scores[N_CLASSES]) {
   softmax(scores, N_CLASSES);
 
   int best = 0;
-  for (int i = 1; i < N_CLASSES; i++)
-    if (scores[i] > scores[best]) best = i;
+  for (int i = 1; i < N_CLASSES; i++) {
+    if (scores[i] > scores[best]) {
+      best = i;
+    }
+  }
   return best;
 }

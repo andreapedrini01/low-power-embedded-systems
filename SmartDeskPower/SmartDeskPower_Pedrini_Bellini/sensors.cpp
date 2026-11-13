@@ -2,8 +2,11 @@
 #include <Arduino_LSM9DS1.h>
 #include <math.h>
 
-static float prev_mag = 1.0f;  // resting gravity baseline
+static float prev_mag = 1.0f;
 
+/*
+ * Initializes the LSM9DS1 IMU peripheral and resets the baseline gravity reference.
+ */
 bool sensors_init() {
   if (!IMU.begin()) {
     Serial.println("IMU init failed");
@@ -14,8 +17,10 @@ bool sensors_init() {
   return true;
 }
 
-// Fill one window at the native accel rate (~119 Hz). Board is stationary;
-// this reads structure-borne vibration from activity on the desk.
+/*
+ * Fills an AccelWindow by polling IMU.accelerationAvailable() until WINDOW_SAMPLES are stored.
+ * Runs at the sensor's hardware output data rate (~119 Hz).
+ */
 bool sensors_acquire_window(AccelWindow &w) {
   w.count = 0;
   while (w.count < WINDOW_SAMPLES) {
@@ -31,18 +36,17 @@ bool sensors_acquire_window(AccelWindow &w) {
   return (w.count == WINDOW_SAMPLES);
 }
 
-// Fast single-sample reading (< 0.2 ms active execution).
-// Reads one (ax, ay, az) from the LSM9DS1, computes magnitude, and returns
-// deviation |mag - prev_mag| to check for mechanical vibration without
-// blocking for a full 1-second window.
+/*
+ * Fetches one immediate sample from the IMU without waiting for a full window buffer.
+ * Calculates |mag - prev_mag| to identify sudden vibration spikes above the noise floor.
+ */
 float sensors_read_single_delta() {
   float ax = 0.0f, ay = 0.0f, az = 1.0f;
   unsigned long start_us = micros();
 
-  // Non-blocking check with tight timeout (~2 ms max)
   while (!IMU.accelerationAvailable()) {
     if (micros() - start_us > 2000) {
-      return 0.0f; // No sample ready; stay in sleep
+      return 0.0f;
     }
   }
 

@@ -1,14 +1,10 @@
 /*
- * SmartDeskPower - Surface Activity Sensing
- * Authors: Pedrini, Bellini
+ * SmartDeskPower - Surface Activity Sensing and Power Management
+ * Authors: Andrea Pedrini, Pietro Bellini
+ * Platform: Arduino Nano 33 BLE Sense (Nordic nRF52840, LSM9DS1 IMU)
  *
- * Senses structure-borne desk vibration to infer occupancy and manage power.
- * Modes:
- *   'r' - record one window (CSV dump over serial)
- *   'c' - classify single window and print class scores + latency
- *   'm' - toggle continuous monitor mode (state machine + LED + power policy)
- *   's' - print energy and timing summary
- *   'q' - quit monitor mode
+ * Implements structure-borne desk vibration sensing to determine user presence
+ * and control desk load power with duty-cycled sniffing and anti-chattering hysteresis.
  */
 
 #include "config.h"
@@ -22,12 +18,11 @@ static AccelWindow window;
 static float       feat[N_FEATURES];
 static float       scores[N_CLASSES];
 
-// State machine
 static bool          monitoring           = false;
-static bool          sniffing             = true;   // Low-power 4 Hz sniffing state
+static bool          sniffing             = true;
 static bool          load_on              = false;
 static int           consecutive_activity = 0;
-static int           quiet_windows        = 0;      // Consecutive quiet windows for sniffing fallback
+static int           quiet_windows        = 0;
 static unsigned long last_activity_ms     = 0;
 
 void record_window();
@@ -35,17 +30,21 @@ void classify_single();
 void step_monitor();
 void set_load_power(bool on);
 
-// SETUP
-
+/*
+ * Configures serial communications, GPIOs, power accounting, the LSM9DS1 IMU,
+ * and boots the system into an initial LOAD ON state.
+ */
 void setup() {
   Serial.begin(115200);
-  while (!Serial && millis() < 3000) { delay(10); }
+  while (!Serial && millis() < 3000) {
+    delay(10);
+  }
 
-  // RGB LED + onboard LED pins
   pinMode(LEDR, OUTPUT);
   pinMode(LEDG, OUTPUT);
   pinMode(LEDB, OUTPUT);
   pinMode(LED_BUILTIN, OUTPUT);
+
   digitalWrite(LEDR, HIGH);
   digitalWrite(LEDG, HIGH);
   digitalWrite(LEDB, HIGH);
@@ -55,25 +54,28 @@ void setup() {
   power_mark_active_begin();
 
   if (!sensors_init()) {
-    Serial.println("FATAL: IMU init failed");
-    while (1) { delay(1000); }
+    Serial.println("FATAL: IMU initialization failed");
+    while (1) {
+      delay(1000);
+    }
   }
 
   inference_init();
 
-  // Initial state: load ON, activity timer started
   set_load_power(true);
   last_activity_ms = millis();
 
   Serial.println("SmartDeskPower - Pedrini, Bellini");
-  Serial.print("Window: ");
+  Serial.print("Window size: ");
   Serial.print(WINDOW_SAMPLES);
-  Serial.println(" samples (~1 s)");
+  Serial.println(" samples (~1 s @ 119 Hz)");
   Serial.println("Commands: r=record, c=classify, m=toggle monitor, s=summary, q=quit");
 }
 
-// MAIN LOOP
-
+/*
+ * Main loop processing incoming serial commands and stepping the continuous
+ * monitoring state machine when enabled.
+ */
 void loop() {
   if (Serial.available()) {
     char cmd = Serial.read();
@@ -119,29 +121,34 @@ void loop() {
   }
 }
 
-// POWER / LED CONTROL
-
+/*
+ * Updates the desk load state and reflects status on onboard LEDs:
+ * LOAD ON: Green LED active, Red LED inactive.
+ * LOAD OFF: Red LED active, Green LED inactive.
+ */
 void set_load_power(bool on) {
   load_on = on;
   if (on) {
     power_load_on();
-    digitalWrite(LEDG, LOW);   // Green ON (active LOW on Nano 33 BLE)
-    digitalWrite(LEDR, HIGH);  // Red OFF
+    digitalWrite(LEDG, LOW);
+    digitalWrite(LEDR, HIGH);
     digitalWrite(LEDB, HIGH);
     digitalWrite(LED_BUILTIN, HIGH);
     Serial.println("POWER: ON");
   } else {
     power_load_off();
-    digitalWrite(LEDG, HIGH);  // Green OFF
-    digitalWrite(LEDR, LOW);   // Red ON (active LOW)
+    digitalWrite(LEDG, HIGH);
+    digitalWrite(LEDR, LOW);
     digitalWrite(LEDB, HIGH);
     digitalWrite(LED_BUILTIN, LOW);
     Serial.println("POWER: OFF");
   }
 }
 
-// RECORD MODE
-
+/*
+ * Waits for the pre-delay interval, captures one 119-sample window, and streams
+ * the raw ax, ay, az data over serial in CSV format for dataset recording.
+ */
 void record_window() {
   delay(RECORD_PRE_DELAY_MS);
 
@@ -162,8 +169,10 @@ void record_window() {
   Serial.println("END");
 }
 
-// SINGLE CLASSIFY MODE
-
+/*
+ * Captures one window, checks the noise gate, extracts features, runs inference,
+ * and prints detailed classification scores and inference latency.
+ */
 void classify_single() {
   Serial.println("Capturing window...");
   if (!sensors_acquire_window(window)) {
@@ -221,19 +230,23 @@ void classify_single() {
   }
 }
 
-// MONITOR MODE (CONTINUOUS WITH LOW-POWER SNIFFING & HYSTERESIS)
-
+/*
+ * Executes one iteration of the continuous monitor state machine:
+ * - State 1 (Sniffing): Samples IMU delta at 4 Hz with 250 ms sleep intervals.
+ *   Transitions to State 2 upon detecting vibration exceeding WAKE_DELTA_G.
+ * - State 2 (Active Sensing): Acquires full 119 Hz window. If RMS >= GATE_RMS,
+ *   extracts 33 features and evaluates the MLP. Updates consecutive activity counters,
+ *   enforces 2-window hysteresis for LOAD ON, and switches LOAD OFF after IDLE_TIMEOUT_MS.
+ *   Returns to State 1 after SNIFF_FALLBACK_WIN consecutive quiet windows while LOAD is OFF.
+ */
 void step_monitor() {
-  // ── State 1: Low-power sniffing (4 Hz, CPU active < 0.1%) ──
   if (sniffing) {
     float delta = sensors_read_single_delta();
     if (delta < WAKE_DELTA_G) {
-      // Sub-threshold background: sleep 250 ms in System ON Idle
       power_sniff_sleep(SNIFF_INTERVAL_MS);
       return;
     }
 
-    // Mechanical vibration detected: wake up into active sensing
     Serial.print("[WAKE] Motion detected (delta=");
     Serial.print(delta, 4);
     Serial.println(" g), capturing 119 Hz window...");
@@ -241,17 +254,15 @@ void step_monitor() {
     quiet_windows = 0;
   }
 
-  // ── State 2: Active sensing (119 Hz window, feature extraction & inference) ──
   if (!sensors_acquire_window(window)) {
     return;
   }
 
   float rms = features_window_rms(window);
-  int   pred = 0;          // 0 = idle
+  int   pred = 0;
   float conf = 1.0f;
   bool  ran_inference = false;
 
-  // Cheap RMS gate check
   if (rms >= GATE_RMS) {
     features_extract(window, feat);
     features_normalize(feat);
@@ -264,18 +275,14 @@ void step_monitor() {
     conf = scores[pred];
     ran_inference = true;
 
-    // Reject low confidence predictions
     if (conf < ACT_THRESHOLD) {
-      pred = 0; // treat ambiguous as idle
+      pred = 0;
     }
   } else {
-    // Vibration below noise gate -> pure idle
     pred = 0;
     conf = 1.0f;
   }
 
-  // Decision mapping: {typing(1), writing(2), handling(3)} = activity
-  //                   {idle(0), incidental(4)} = no activity
   bool is_activity = (pred == 1 || pred == 2 || pred == 3);
   unsigned long now_ms = millis();
 
@@ -294,23 +301,22 @@ void step_monitor() {
     }
   }
 
-  // Monitor status line
   Serial.print("[mon] ");
   Serial.print(CLASS_LABELS[pred]);
   Serial.print(" (");
   Serial.print(conf, 2);
   Serial.print(") rms=");
   Serial.print(rms, 4);
-  if (!ran_inference) Serial.print(" [gate]");
+  if (!ran_inference) {
+    Serial.print(" [gate]");
+  }
   Serial.print(" | LOAD: ");
   Serial.println(load_on ? "ON" : "OFF");
 
-  // Hysteresis fallback: only return to sniffing if load is OFF and we observe SNIFF_FALLBACK_WIN consecutive quiet windows
   if (!load_on && quiet_windows >= SNIFF_FALLBACK_WIN) {
     sniffing = true;
     Serial.println("[SNIFF] Quiet surface & load OFF -> returning to low-power sniffing (4 Hz)");
   } else {
-    // Inter-window sleep during active tracking
     power_sleep(100);
   }
 }
