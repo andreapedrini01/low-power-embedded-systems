@@ -4,22 +4,13 @@
 #include "config.h"
 #include "sensors.h"
 
-/*
- * Computes the 33-element statistical feature vector from an acceleration window:
- * - Features [0..31]: 8 time-domain statistics for ax, ay, az, and Euclidean magnitude.
- * - Feature [32]: Sub-window energy burstiness (standard deviation of chunk RMS).
- */
+// Extract 33 features: 8 stats x 4 channels (ax, ay, az, magnitude) + 1 burstiness metric.
 void features_extract(const AccelWindow &w, float out[N_FEATURES]);
 
-/*
- * Performs in-place Z-score standardization on the 33 features using NORM_MEAN and NORM_STD.
- */
+// In-place Z-score normalization: (f - NORM_MEAN) / NORM_STD.
 void features_normalize(float f[N_FEATURES]);
 
-/*
- * Computes the mean-removed RMS (standard deviation of magnitude) across the window.
- * Used as an early-exit gate to reject idle noise before executing inference.
- */
+// Compute dynamic RMS (standard deviation of magnitude) for the noise gate.
 float features_window_rms(const AccelWindow &w);
 
 #endif // FEATURES_H

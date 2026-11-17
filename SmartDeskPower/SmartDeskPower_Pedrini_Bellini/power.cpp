@@ -13,9 +13,7 @@ static unsigned long total_load_on_us;
 static unsigned long total_load_off_us;
 static unsigned long last_latency_us = 0;
 
-/*
- * Resets timing accumulators and initializes timestamps.
- */
+// Reset all timing counters to zero.
 void power_init() {
   active_open       = false;
   total_active_us   = 0;
@@ -27,26 +25,20 @@ void power_init() {
   load_change_us    = micros();
 }
 
-/*
- * Records the start timestamp of an active CPU processing phase.
- */
+// Start tracking active CPU execution time.
 void power_mark_active_begin() {
   active_start_us = micros();
   active_open = true;
 }
 
-/*
- * Computes elapsed time since the active phase began and accumulates it into total_active_us.
- */
+// Stop tracking active CPU time and add delta to total.
 void power_mark_active_end() {
   if (!active_open) return;
   total_active_us += micros() - active_start_us;
   active_open = false;
 }
 
-/*
- * Suspends execution for ms milliseconds while accumulating sleep time.
- */
+// Sleep for ms milliseconds and log active sleep time.
 void power_sleep(unsigned long ms) {
   bool was = active_open;
   if (was) power_mark_active_end();
@@ -58,9 +50,7 @@ void power_sleep(unsigned long ms) {
   if (was) power_mark_active_begin();
 }
 
-/*
- * Suspends execution during 4 Hz sniffing intervals, accumulating sniffing sleep duration.
- */
+// Sleep for sniffing interval (250 ms) and log sniffing sleep time.
 void power_sniff_sleep(unsigned long ms) {
   bool was = active_open;
   if (was) power_mark_active_end();
@@ -76,10 +66,7 @@ unsigned long power_active_us() { return total_active_us; }
 unsigned long power_sleep_us()  { return total_sleep_us; }
 unsigned long power_sniff_us()  { return total_sniff_us; }
 
-/*
- * Calculates energy consumed by the board in mJ:
- * E = V_BUS * (I_ACTIVE * t_active + I_SLEEP * t_sleep).
- */
+// Compute board energy in mJ: E = V_BUS * (I_ACTIVE * t_active + I_SLEEP * t_sleep).
 float power_board_energy_mj() {
   float a_ms = total_active_us / 1000.0f;
   float s_ms = (total_sleep_us + total_sniff_us) / 1000.0f;
@@ -87,9 +74,7 @@ float power_board_energy_mj() {
   return e_uj / 1000.0f;
 }
 
-/*
- * Switches state to LOAD ON and accumulates the preceding OFF duration.
- */
+// Set load status to ON and accumulate preceding OFF time.
 void power_load_on() {
   if (load_flag) return;
   unsigned long now = micros();
@@ -98,9 +83,7 @@ void power_load_on() {
   load_flag = true;
 }
 
-/*
- * Switches state to LOAD OFF and accumulates the preceding ON duration.
- */
+// Set load status to OFF and accumulate preceding ON time.
 void power_load_off() {
   if (!load_flag) return;
   unsigned long now = micros();
@@ -112,25 +95,18 @@ void power_load_off() {
 unsigned long power_load_on_us()  { return total_load_on_us; }
 unsigned long power_load_off_us() { return total_load_off_us; }
 
-/*
- * Computes energy saved by turning off desk peripherals (in mJ):
- * E_saved = LOAD_WATTS * t_off * 1000.
- */
+// Energy saved by turning off peripherals: E_saved = LOAD_WATTS * t_off * 1000.
 float power_load_saved_mj() {
   float off_s = total_load_off_us / 1e6f;
   return LOAD_WATTS * off_s * 1000.0f;
 }
 
-/*
- * Updates the recorded latency measurement for the last inference cycle.
- */
+// Record inference latency for the summary report.
 void power_record_latency(unsigned long lat_us) {
   last_latency_us = lat_us;
 }
 
-/*
- * Outputs a diagnostic summary of runtimes, duty cycles, and energy metrics over serial.
- */
+// Print timing, duty cycle, and energy summary to serial.
 void power_print_summary() {
   unsigned long now = micros();
   if (active_open) {

@@ -42,6 +42,7 @@ CLOCK_FREQ_HZ = 64e6   # 64 MHz
 # ── Feature Extraction (Identical to features.cpp) ──
 
 def channel_stats(x):
+    """Compute 8 summary statistics for a 1D array."""
     n = len(x)
     mean_val = np.mean(x)
     var_val = max(0.0, np.mean(x**2) - mean_val**2)
@@ -60,6 +61,7 @@ def channel_stats(x):
 
 
 def extract_features(window):
+    """Extract 33 features from a 119x3 window matching features.cpp."""
     ax = window[:, 0]
     ay = window[:, 1]
     az = window[:, 2]
@@ -85,60 +87,54 @@ def extract_features(window):
     return np.array(feats, dtype=np.float32)
 
 
-# ── Dataset Loading & Synthetic Fallback ──
-
 def load_dataset(dataset_dir="dataset"):
+    """Load CSV files for all 5 classes and segment into 119-sample windows."""
+    if not os.path.isdir(dataset_dir):
+        raise FileNotFoundError(
+            f"Dataset directory '{dataset_dir}' not found. "
+            "Real recorded data is strictly required; synthetic data generation is disabled."
+        )
+
     X_windows = []
     y_labels = []
 
-    found_any = False
+    missing = []
     for label in CLASSES:
         csv_file = os.path.join(dataset_dir, f"{label}.csv")
-        if os.path.exists(csv_file):
-            found_any = True
-            df = pd.read_csv(csv_file)
-            cols = [c for c in df.columns if c.strip().lower() in ['ax', 'ay', 'az']]
-            data = df[cols].values
+        if not os.path.exists(csv_file):
+            missing.append(csv_file)
+            continue
 
-            n_samples = len(data)
-            n_windows = n_samples // WINDOW_SAMPLES
-            print(f"Loaded '{label}': {n_samples} samples -> {n_windows} windows")
+        df = pd.read_csv(csv_file)
+        cols = [c for c in df.columns if c.strip().lower() in ['ax', 'ay', 'az']]
+        if len(cols) < 3:
+            raise ValueError(f"File '{csv_file}' must contain 'aX', 'aY', 'aZ' columns.")
 
-            for w in range(n_windows):
-                start = w * WINDOW_SAMPLES
-                end = start + WINDOW_SAMPLES
-                X_windows.append(data[start:end])
-                y_labels.append(CLASS_TO_IDX[label])
+        data = df[cols].values
+        n_samples = len(data)
+        n_windows = n_samples // WINDOW_SAMPLES
+        if n_windows == 0:
+            raise ValueError(
+                f"File '{csv_file}' contains only {n_samples} samples "
+                f"(requires at least 1 full window of {WINDOW_SAMPLES} samples)."
+            )
 
-    if not found_any or len(X_windows) == 0:
-        print("NOTE: No real CSVs found in dataset/. Generating synthetic dataset for test run...")
-        for label_idx, label in enumerate(CLASSES):
-            n_win = 40
-            for _ in range(n_win):
-                t = np.linspace(0, 1, WINDOW_SAMPLES)
-                ax = np.random.normal(0, 0.005, WINDOW_SAMPLES)
-                ay = np.random.normal(0, 0.005, WINDOW_SAMPLES)
-                az = 1.0 + np.random.normal(0, 0.005, WINDOW_SAMPLES)
+        print(f"Loaded '{label}': {n_samples} samples -> {n_windows} windows")
 
-                if label == "typing":
-                    burst_idx = np.random.choice(WINDOW_SAMPLES, size=8, replace=False)
-                    for idx in burst_idx:
-                        ax[idx:min(idx+3, WINDOW_SAMPLES)] += np.random.normal(0, 0.08)
-                        az[idx:min(idx+3, WINDOW_SAMPLES)] += np.random.normal(0, 0.12)
-                elif label == "writing":
-                    ax += 0.02 * np.sin(2 * np.pi * 15 * t) + np.random.normal(0, 0.015, WINDOW_SAMPLES)
-                    ay += 0.02 * np.cos(2 * np.pi * 15 * t) + np.random.normal(0, 0.015, WINDOW_SAMPLES)
-                elif label == "handling":
-                    idx = np.random.randint(10, 80)
-                    ax[idx:idx+15] += np.random.normal(0, 0.15, min(15, WINDOW_SAMPLES - idx))
-                    az[idx:idx+15] += np.random.normal(0, 0.25, min(15, WINDOW_SAMPLES - idx))
-                elif label == "incidental":
-                    idx = np.random.randint(20, 90)
-                    ax[idx:idx+4] += np.random.normal(0, 0.35, min(4, WINDOW_SAMPLES - idx))
-                    az[idx:idx+4] += np.random.normal(0, 0.50, min(4, WINDOW_SAMPLES - idx))
+        for w in range(n_windows):
+            start = w * WINDOW_SAMPLES
+            end = start + WINDOW_SAMPLES
+            X_windows.append(data[start:end])
+            y_labels.append(CLASS_TO_IDX[label])
 
-                X_windows.append(np.column_stack([ax, ay, az]))
-                y_labels.append(label_idx)
+    if missing:
+        raise FileNotFoundError(
+            f"Missing required class files in '{dataset_dir}': {missing}. "
+            "Real recorded data is strictly required; synthetic data generation is disabled."
+        )
+
+    if len(X_windows) == 0:
+        raise ValueError(f"No valid data windows extracted from '{dataset_dir}'.")
 
     return np.array(X_windows, dtype=np.float32), np.array(y_labels, dtype=np.int32)
 
@@ -146,11 +142,7 @@ def load_dataset(dataset_dir="dataset"):
 # ── Analytical Computational Cost Calculator ──
 
 def compute_complexity_metrics():
-    """
-    Computes theoretical FLOPs/MACs, estimated latency and energy per inference
-    on Cortex-M4F @ 64 MHz with single-precision FPU.
-    Assuming ~2 cycles per MAC (load/accumulate pipeline).
-    """
+    """Calculate FLOPs, MACs, latency, and energy on Cortex-M4F @ 64 MHz."""
     # 1. Energy Threshold
     # RMS on magnitude = 119 samples * 3 (squares) + 1 sqrt -> ~360 FLOPs
     th_flops = 360
@@ -214,6 +206,7 @@ def compute_complexity_metrics():
 # ── Export model.h ──
 
 def export_model_h(model, norm_mean, norm_std, filepath):
+    """Export model weights and normalization constants to model.h."""
     weights = model.get_weights()
     w1, b1 = weights[0], weights[1]
     w2, b2 = weights[2], weights[3]

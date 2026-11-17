@@ -3,70 +3,44 @@
 
 #include <Arduino.h>
 
-/*
- * Resets all power and execution time tracking counters.
- */
+// Reset execution and power timing accumulators.
 void power_init();
 
-/*
- * Marks the transition into active processing to accumulate CPU execution microseconds.
- */
+// Track start of active CPU processing.
 void power_mark_active_begin();
 
-/*
- * Marks the transition out of active processing to update total active runtime.
- */
+// Track end of active CPU processing and add elapsed time to total.
 void power_mark_active_end();
 
-/*
- * Puts the microcontroller into low-power sleep for the specified duration in milliseconds,
- * tracking sleep duration and suspending active CPU accounting.
- */
+// Put MCU in sleep for ms milliseconds, tracking sleep time.
 void power_sleep(unsigned long ms);
 
-/*
- * Dedicated sleep function for low-power duty-cycled sniffing intervals (250 ms),
- * tracking sniffing energy separately from active sensing sleep.
- */
+// Sleep for 4 Hz duty-cycled sniffing (250 ms), tracked separately.
 void power_sniff_sleep(unsigned long ms);
 
 unsigned long power_active_us();
 unsigned long power_sleep_us();
 unsigned long power_sniff_us();
 
-/*
- * Estimates total electrical energy consumed by the board in millijoules
- * based on active/sleep duty cycles and current models.
- */
+// Estimated board energy (mJ) from active/sleep duty cycle.
 float power_board_energy_mj();
 
-/*
- * Records the desk peripheral load as powered ON, updating cumulative load timers.
- */
+// Switch load tracker to ON.
 void power_load_on();
 
-/*
- * Records the desk peripheral load as powered OFF, updating cumulative load timers.
- */
+// Switch load tracker to OFF.
 void power_load_off();
 
 unsigned long power_load_on_us();
 unsigned long power_load_off_us();
 
-/*
- * Computes energy saved in millijoules by keeping the assumed peripheral load switched OFF.
- */
+// Estimated load energy saved (mJ) while peripherals were powered OFF.
 float power_load_saved_mj();
 
-/*
- * Stores the latency in microseconds of the most recent inference execution.
- */
+// Store latency (us) of the last inference call.
 void power_record_latency(unsigned long lat_us);
 
-/*
- * Prints a formatted diagnostic summary of session runtime, active duty cycle,
- * estimated board energy, and peripheral energy saved.
- */
+// Print timing, duty cycle, and energy summary to serial.
 void power_print_summary();
 
 #endif // POWER_H

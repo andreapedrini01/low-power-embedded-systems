@@ -30,10 +30,7 @@ void classify_single();
 void step_monitor();
 void set_load_power(bool on);
 
-/*
- * Configures serial communications, GPIOs, power accounting, the LSM9DS1 IMU,
- * and boots the system into an initial LOAD ON state.
- */
+// Hardware and peripheral setup: serial, LEDs, energy tracking, and LSM9DS1.
 void setup() {
   Serial.begin(115200);
   while (!Serial && millis() < 3000) {
@@ -72,10 +69,7 @@ void setup() {
   Serial.println("Commands: r=record, c=classify, m=toggle monitor, s=summary, q=quit");
 }
 
-/*
- * Main loop processing incoming serial commands and stepping the continuous
- * monitoring state machine when enabled.
- */
+// Process serial commands and run monitor cycle if enabled.
 void loop() {
   if (Serial.available()) {
     char cmd = Serial.read();
@@ -121,11 +115,7 @@ void loop() {
   }
 }
 
-/*
- * Updates the desk load state and reflects status on onboard LEDs:
- * LOAD ON: Green LED active, Red LED inactive.
- * LOAD OFF: Red LED active, Green LED inactive.
- */
+// Set desk load state and update green (ON) / red (OFF) LEDs.
 void set_load_power(bool on) {
   load_on = on;
   if (on) {
@@ -145,10 +135,7 @@ void set_load_power(bool on) {
   }
 }
 
-/*
- * Waits for the pre-delay interval, captures one 119-sample window, and streams
- * the raw ax, ay, az data over serial in CSV format for dataset recording.
- */
+// Capture one 119-sample window and print CSV over serial.
 void record_window() {
   delay(RECORD_PRE_DELAY_MS);
 
@@ -169,10 +156,7 @@ void record_window() {
   Serial.println("END");
 }
 
-/*
- * Captures one window, checks the noise gate, extracts features, runs inference,
- * and prints detailed classification scores and inference latency.
- */
+// Acquire one window, run feature extraction and inference, print scores and latency.
 void classify_single() {
   Serial.println("Capturing window...");
   if (!sensors_acquire_window(window)) {
@@ -230,15 +214,7 @@ void classify_single() {
   }
 }
 
-/*
- * Executes one iteration of the continuous monitor state machine:
- * - State 1 (Sniffing): Samples IMU delta at 4 Hz with 250 ms sleep intervals.
- *   Transitions to State 2 upon detecting vibration exceeding WAKE_DELTA_G.
- * - State 2 (Active Sensing): Acquires full 119 Hz window. If RMS >= GATE_RMS,
- *   extracts 33 features and evaluates the MLP. Updates consecutive activity counters,
- *   enforces 2-window hysteresis for LOAD ON, and switches LOAD OFF after IDLE_TIMEOUT_MS.
- *   Returns to State 1 after SNIFF_FALLBACK_WIN consecutive quiet windows while LOAD is OFF.
- */
+// Two-state monitor: 4 Hz sniffing when idle, 119 Hz window inference when motion is sensed.
 void step_monitor() {
   if (sniffing) {
     float delta = sensors_read_single_delta();

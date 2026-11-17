@@ -17,7 +17,7 @@ WINDOW_HEADER = "aX,aY,aZ"
 
 
 def read_window(ser, timeout=8):
-    """Reads one START..END block over serial and returns sample rows."""
+    """Read one START..END block over serial; return sample rows."""
     t_start = time.time()
 
     while True:
@@ -65,7 +65,7 @@ def read_window(ser, timeout=8):
 
 
 def count_existing_windows(filepath, window_size=119):
-    """Counts complete sample windows existing in a target CSV file."""
+    """Count complete sample windows in target CSV."""
     if not os.path.exists(filepath):
         return 0
     with open(filepath, "r", encoding="utf-8") as f:
@@ -75,7 +75,7 @@ def count_existing_windows(filepath, window_size=119):
 
 
 def append_window(filepath, rows):
-    """Appends sample rows to the target CSV file, creating headers if needed."""
+    """Append sample rows to target CSV file, creating header if needed."""
     new_file = not os.path.exists(filepath) or os.path.getsize(filepath) == 0
     with open(filepath, "a", encoding="utf-8") as f:
         if new_file:

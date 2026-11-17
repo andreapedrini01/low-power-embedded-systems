@@ -2,12 +2,7 @@
 #include "active_model.h"
 #include <math.h>
 
-/*
- * Computes 8 time-domain statistics for an array of n samples:
- * [0] mean, [1] standard deviation, [2] RMS, [3] minimum,
- * [4] maximum, [5] peak-to-peak range, [6] mean absolute value,
- * [7] zero-crossing rate relative to the mean.
- */
+// Compute 8 summary statistics for a 1D sample buffer.
 static void channel_stats(const float *data, int n, float out[8]) {
   float sum = 0, sq_sum = 0, abs_sum = 0;
   float mn = data[0], mx = data[0];
@@ -42,12 +37,7 @@ static void channel_stats(const float *data, int n, float out[8]) {
   out[7] = (float)zc / n;
 }
 
-/*
- * Extracts the 33 features from an acceleration window.
- * Calculates channel_stats for ax, ay, az, and 3D magnitude (features 0..31),
- * then partitions magnitude into ~12-sample chunks to calculate temporal energy
- * variance (burstiness, feature 32) to separate keystrokes from friction.
- */
+// Compute 32 channel statistics and 1 burstiness metric from a 119-sample window.
 void features_extract(const AccelWindow &w, float out[N_FEATURES]) {
   int n = w.count;
 
@@ -89,10 +79,7 @@ void features_extract(const AccelWindow &w, float out[N_FEATURES]) {
   out[32] = sqrtf(sub_var / n_subs);
 }
 
-/*
- * Standardizes each feature in-place using pre-computed normalization parameters:
- * f_norm = (f - NORM_MEAN) / NORM_STD.
- */
+// In-place Z-score standardization: (f - NORM_MEAN) / NORM_STD.
 void features_normalize(float f[N_FEATURES]) {
   for (int i = 0; i < N_FEATURES; i++) {
     float s = NORM_STD[i];
@@ -100,10 +87,7 @@ void features_normalize(float f[N_FEATURES]) {
   }
 }
 
-/*
- * Evaluates the root-mean-square amplitude of dynamic acceleration around its gravity mean.
- * Provides a low-cost scalar measure of desk vibration amplitude.
- */
+// Mean-removed RMS of magnitude used as a noise gate threshold.
 float features_window_rms(const AccelWindow &w) {
   float sum = 0, sq_sum = 0;
   int n = w.count;

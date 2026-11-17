@@ -2,18 +2,12 @@
 #include "active_model.h"
 #include <math.h>
 
-/*
- * Initializes inference resources.
- * Returns true as all network weights and biases are statically stored in flash.
- */
+// Static flash weights need no heap initialization.
 bool inference_init() {
   return true;
 }
 
-/*
- * Computes a fully connected layer: out = ReLU(w * in + b) or out = w * in + b.
- * Weights are indexed in row-major order: w[i * n_out + j].
- */
+// Fully-connected layer: out = ReLU(w * in + b) or out = w * in + b.
 static void dense(const float *in, const float *w, const float *b,
                   float *out, int n_in, int n_out, bool relu) {
   for (int j = 0; j < n_out; j++) {
@@ -25,10 +19,7 @@ static void dense(const float *in, const float *w, const float *b,
   }
 }
 
-/*
- * Normalizes an array of raw logits into probabilities via softmax.
- * Subtracts the maximum element prior to exponentiation to prevent numerical overflow.
- */
+// Numerically stable softmax: subtract max logit before exponentiating.
 static void softmax(float *v, int n) {
   float mx = v[0];
   for (int i = 1; i < n; i++) {
@@ -46,11 +37,7 @@ static void softmax(float *v, int n) {
   }
 }
 
-/*
- * Evaluates the 3-layer MLP over the 33 normalized input features.
- * Computes layer 1 (33->12, ReLU), layer 2 (12->6, ReLU), and layer 3 (6->5, Softmax).
- * Returns the class index with the highest probability.
- */
+// 3-layer MLP forward pass (33 -> 12 -> 6 -> 5) with ReLU and softmax.
 int inference_run(const float features[N_FEATURES], float scores[N_CLASSES]) {
   float h1[L1_OUT];
   float h2[L2_OUT];

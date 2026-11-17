@@ -3,11 +3,7 @@
 
 #include "config.h"
 
-/*
- * Conditional Model Selector
- * Selects between the pre-trained base model and the surface-calibrated fine-tuned model
- * based on the USE_FINETUNED_MODEL macro defined in config.h.
- */
+// Include calibrated model if USE_FINETUNED_MODEL is defined, otherwise use base model.
 #ifdef USE_FINETUNED_MODEL
   #include "model_finetuned.h"
 #else

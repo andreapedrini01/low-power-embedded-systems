@@ -47,7 +47,7 @@ BASE_B3 = [
 
 
 def channel_stats(x):
-    """Computes 8 time-domain statistical metrics for a 1D sample array."""
+    """Compute 8 summary statistics for a 1D array."""
     n = len(x)
     mean_val = sum(x) / n
     sq_sum = sum(v * v for v in x)
@@ -67,7 +67,7 @@ def channel_stats(x):
 
 
 def extract_features(window):
-    """Extracts the 33-element feature vector matching firmware features_extract()."""
+    """Extract 33 features matching firmware features_extract()."""
     ax = [r[0] for r in window]
     ay = [r[1] for r in window]
     az = [r[2] for r in window]
@@ -96,13 +96,22 @@ def extract_features(window):
 
 
 def load_dataset(dataset_dir):
-    """Loads CSV files for all 5 classes and segments data into 119-sample windows."""
+    """Load CSV files for all 5 classes and segment into 119-sample windows."""
+    if not os.path.isdir(dataset_dir):
+        raise FileNotFoundError(
+            f"Dataset directory '{dataset_dir}' not found. "
+            "Real recorded calibration data is strictly required; synthetic fallback is disabled."
+        )
+
     windows = []
     labels = []
     for label in CLASSES:
         path = os.path.join(dataset_dir, f"{label}.csv")
         if not os.path.exists(path):
-            raise FileNotFoundError(f"Missing '{path}' in calibration directory '{dataset_dir}'")
+            raise FileNotFoundError(
+                f"Missing required calibration file '{path}'. "
+                "Real recorded data is strictly required; synthetic data generation is disabled."
+            )
         with open(path, "r", encoding="utf-8") as f:
             reader = csv.reader(f)
             header = next(reader)
@@ -114,6 +123,11 @@ def load_dataset(dataset_dir):
                     except ValueError:
                         pass
         n_win = len(rows) // WINDOW_SAMPLES
+        if n_win == 0:
+            raise ValueError(
+                f"File '{path}' contains only {len(rows)} samples "
+                f"(requires at least 1 full window of {WINDOW_SAMPLES} samples)."
+            )
         print(f"Loaded '{label}': {n_win} windows ({len(rows)} samples)")
         for w in range(n_win):
             windows.append(rows[w * WINDOW_SAMPLES:(w + 1) * WINDOW_SAMPLES])
@@ -122,7 +136,7 @@ def load_dataset(dataset_dir):
 
 
 def forward_frozen_layers(feat_norm):
-    """Computes representations h2 through frozen pre-trained Layers 1 and 2."""
+    """Compute layer 2 activations through frozen Layers 1 and 2."""
     h1 = [0.0] * L1_OUT
     for j in range(L1_OUT):
         s = BASE_B1[j]
@@ -149,7 +163,7 @@ def softmax(logits):
 
 
 def train_output_layer(H_train, y_train, epochs=150, lr=0.10, l2_reg=0.001):
-    """Trains output layer weights (6 -> 5) via softmax cross-entropy gradient descent."""
+    """Train output layer weights (6 -> 5) via cross-entropy gradient descent."""
     N = len(H_train)
     w = list(BASE_W3)
     b = list(BASE_B3)
@@ -195,7 +209,7 @@ def train_output_layer(H_train, y_train, epochs=150, lr=0.10, l2_reg=0.001):
 
 
 def export_finetuned_header(norm_mean, norm_std, w3, b3, filepath):
-    """Exports calibrated weights and normalization constants to a C++ header."""
+    """Export calibrated weights and normalization constants to C++ header."""
     lines = []
     lines.append("#ifndef MODEL_FINETUNED_H")
     lines.append("#define MODEL_FINETUNED_H")

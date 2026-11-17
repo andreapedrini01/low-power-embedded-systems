@@ -4,9 +4,7 @@
 
 static float prev_mag = 1.0f;
 
-/*
- * Initializes the LSM9DS1 IMU peripheral and resets the baseline gravity reference.
- */
+// Init LSM9DS1 and store baseline gravity reading.
 bool sensors_init() {
   if (!IMU.begin()) {
     Serial.println("IMU init failed");
@@ -17,10 +15,7 @@ bool sensors_init() {
   return true;
 }
 
-/*
- * Fills an AccelWindow by polling IMU.accelerationAvailable() until WINDOW_SAMPLES are stored.
- * Runs at the sensor's hardware output data rate (~119 Hz).
- */
+// Poll IMU at 119 Hz until a complete window (119 samples) is buffered.
 bool sensors_acquire_window(AccelWindow &w) {
   w.count = 0;
   while (w.count < WINDOW_SAMPLES) {
@@ -36,10 +31,7 @@ bool sensors_acquire_window(AccelWindow &w) {
   return (w.count == WINDOW_SAMPLES);
 }
 
-/*
- * Fetches one immediate sample from the IMU without waiting for a full window buffer.
- * Calculates |mag - prev_mag| to identify sudden vibration spikes above the noise floor.
- */
+// Single-sample read with 2 ms timeout; returns delta from previous magnitude.
 float sensors_read_single_delta() {
   float ax = 0.0f, ay = 0.0f, az = 1.0f;
   unsigned long start_us = micros();
